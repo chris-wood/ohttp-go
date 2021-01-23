@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/http/httputil"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -65,7 +66,7 @@ func TestFieldListMarshal(t *testing.T) {
 					},
 				},
 			},
-			enc: []byte{0b00001000, 0b00000011, 'f', 'o', 'o', 0b00000011, 'b', 'a', 'r'},
+			enc: []byte{0b00000011, 'f', 'o', 'o', 0b00000011, 'b', 'a', 'r'},
 		},
 	}
 
@@ -99,14 +100,13 @@ func TestRequestMarshal(t *testing.T) {
 
 	// 00000000  00 03 47 45 54 05 68 74  74 70 73 0f 77 77 77 2e  |..GET.https.www.|
 	// 00000010  65 78 61 6d 70 6c 65 2e  63 6f 6d 0a 2f 68 65 6c  |example.com./hel|
-	// 00000020  6c 6f 2e 74 78 74 40 71  40 6f 04 68 6f 73 74 10  |lo.txt@q@o.host.|
-	// 00000030  77 77 77 2e 65 78 61 6d  70 6c 65 2e 63 6f 6d 20  |www.example.com |
-	// 00000040  0f 61 63 63 65 70 74 2d  6c 61 6e 67 75 61 67 65  |.accept-language|
-	// 00000050  07 65 6e 2c 20 6d 69 20  0a 75 73 65 72 2d 61 67  |.en, mi .user-ag|
-	// 00000060  65 6e 74 35 63 75 72 6c  2f 37 2e 31 36 2e 33 20  |ent5curl/7.16.3 |
-	// 00000070  6c 69 62 63 75 72 6c 2f  37 2e 31 36 2e 33 20 4f  |libcurl/7.16.3 O|
-	// 00000080  70 65 6e 53 53 4c 2f 30  2e 39 2e 37 6c 20 7a 6c  |penSSL/0.9.7l zl|
-	// 00000090  69 62 2f 31 2e 32 2e 33  20 00 00                 |ib/1.2.3 ..|
+	// 00000020  6c 6f 2e 74 78 74 40 5b  40 59 0f 61 63 63 65 70  |lo.txt@[@Y.accep|
+	// 00000030  74 2d 6c 61 6e 67 75 61  67 65 07 65 6e 2c 20 6d  |t-language.en, m|
+	// 00000040  69 20 0a 75 73 65 72 2d  61 67 65 6e 74 35 63 75  |i .user-agent5cu|
+	// 00000050  72 6c 2f 37 2e 31 36 2e  33 20 6c 69 62 63 75 72  |rl/7.16.3 libcur|
+	// 00000060  6c 2f 37 2e 31 36 2e 33  20 4f 70 65 6e 53 53 4c  |l/7.16.3 OpenSSL|
+	// 00000070  2f 30 2e 39 2e 37 6c 20  7a 6c 69 62 2f 31 2e 32  |/0.9.7l zlib/1.2|
+	// 00000080  2e 33 20 00 00                                    |.3 ..|
 
 	req, err := http.NewRequest(http.MethodGet, "https://www.example.com/hello.txt", nil)
 	require.Nil(t, err, "NewRequest failed")
@@ -120,6 +120,12 @@ func TestRequestMarshal(t *testing.T) {
 	require.Nil(t, err, "BinaryRequest Marshal failed")
 
 	fmt.Printf("%s", hex.Dump(enc))
+
+	fmt.Println(hex.EncodeToString(enc))
+
+	reqEnc, err := httputil.DumpRequest(req, true)
+	require.Nil(t, err, "Dump request failed")
+	fmt.Println(string(reqEnc))
 }
 
 func TestResponseMarshal(t *testing.T) {
@@ -128,6 +134,7 @@ func TestResponseMarshal(t *testing.T) {
 		StatusCode: http.StatusOK,
 		Header: http.Header{
 			"Content-Type": []string{"text/plain"},
+			"Test-Header":  []string{"foobarbaz"},
 		},
 	}
 
@@ -138,4 +145,10 @@ func TestResponseMarshal(t *testing.T) {
 	require.Nil(t, err, "BinaryResponse Marshal failed")
 
 	fmt.Printf("%s", hex.Dump(enc))
+
+	fmt.Println(hex.EncodeToString(enc))
+
+	respEnc, err := httputil.DumpResponse(&resp, true)
+	require.Nil(t, err, "Dump response failed")
+	fmt.Println(string(respEnc))
 }

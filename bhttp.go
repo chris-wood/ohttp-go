@@ -74,8 +74,6 @@ func (r *BinaryRequest) Marshal() ([]byte, error) {
 	// Framing
 	b.Write(knownLengthRequestFrame.Marshal())
 
-	// TODO(caw): what do requests do with the "Informational Response Control Data" field? Skip it?
-
 	// Control data
 	controlData := createControlData(r)
 	b.Write(controlData.Marshal())
@@ -210,30 +208,18 @@ func (l fieldList) Marshal() []byte {
 	for _, f := range l.fields {
 		b.Write(f.Marshal())
 	}
-	body := b.Bytes()
-
-	b = new(bytes.Buffer)
-	encodeVarintSlice(b, body)
-
 	return b.Bytes()
 }
 
 func (l *fieldList) Unmarshal(b *bytes.Buffer) error {
-	body, err := readVarintSlice(b)
-	if err != nil {
-		return err
-	}
-
 	fields := make([]field, 0)
-
-	buf := bytes.NewBuffer(body)
 	for {
-		if buf.Len() == 0 {
+		if b.Len() == 0 {
 			break
 		}
 
 		field := new(field)
-		err = field.Unmarshal(buf)
+		err := field.Unmarshal(b)
 		if err != nil {
 			return err
 		}
@@ -275,8 +261,6 @@ func (r *BinaryResponse) Marshal() ([]byte, error) {
 	// Framing
 	b.Write(knownLengthResponseFrame.Marshal())
 
-	// TODO(caw): what do requests do with the "Informational Response Control Data" field? Skip it?
-
 	// Response control data
 	controlData := finalResponseControlData{r.StatusCode}
 	b.Write(controlData.Marshal())
@@ -295,10 +279,6 @@ func (r *BinaryResponse) Marshal() ([]byte, error) {
 	} else {
 		encodeVarintSlice(b, []byte{})
 	}
-
-	// Trailer fields
-	// TODO(caw): add support for trailing fields
-	Write(b, uint64(0))
 
 	return b.Bytes(), nil
 }
