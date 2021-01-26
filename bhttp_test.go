@@ -152,3 +152,5 @@ func TestResponseMarshal(t *testing.T) {
 	require.Nil(t, err, "Dump response failed")
 	fmt.Println(string(respEnc))
 }
+
+// TODO(caw): write request/response marshal tests

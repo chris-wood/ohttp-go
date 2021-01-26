@@ -1,6 +1,7 @@
 package ohttp
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
@@ -23,20 +24,19 @@ type PublicConfig struct {
 }
 
 type PrivateConfig struct {
+	seed   []byte
 	config PublicConfig
 	sk     hpke.KEMPrivateKey
 	pk     hpke.KEMPublicKey
 }
 
-func CreatePrivateConfig(kemID hpke.KEMID, kdfID hpke.KDFID, aeadID hpke.AEADID) (PrivateConfig, error) {
+func NewConfigFromSeed(kemID hpke.KEMID, kdfID hpke.KDFID, aeadID hpke.AEADID, seed []byte) (PrivateConfig, error) {
 	suite, err := hpke.AssembleCipherSuite(kemID, kdfID, aeadID)
 	if err != nil {
 		return PrivateConfig{}, err
 	}
 
-	ikm := make([]byte, suite.KEM.PrivateKeySize())
-	rand.Reader.Read(ikm)
-	sk, pk, err := suite.KEM.DeriveKeyPair(ikm)
+	sk, pk, err := suite.KEM.DeriveKeyPair(seed)
 	if err != nil {
 		return PrivateConfig{}, err
 	}
@@ -55,10 +55,23 @@ func CreatePrivateConfig(kemID hpke.KEMID, kdfID hpke.KDFID, aeadID hpke.AEADID)
 	}
 
 	return PrivateConfig{
+		seed:   seed,
 		config: publicConfig,
 		sk:     sk,
 		pk:     pk,
 	}, nil
+}
+
+func NewConfig(kemID hpke.KEMID, kdfID hpke.KDFID, aeadID hpke.AEADID) (PrivateConfig, error) {
+	suite, err := hpke.AssembleCipherSuite(kemID, kdfID, aeadID)
+	if err != nil {
+		return PrivateConfig{}, err
+	}
+
+	ikm := make([]byte, suite.KEM.PrivateKeySize())
+	rand.Reader.Read(ikm)
+
+	return NewConfigFromSeed(kemID, kdfID, aeadID, ikm)
 }
 
 func (c PublicConfig) Marshal() []byte {
@@ -66,18 +79,17 @@ func (c PublicConfig) Marshal() []byte {
 
 	b.AddUint8(c.ID)
 	b.AddUint16(uint16(c.KEMID))
-	for _, s := range c.Suites {
-		b.AddUint16(uint16(s.KDFID))
-		b.AddUint16(uint16(s.AEADID))
-	}
-	b.AddBytes(c.PublicKeyBytes)
+	b.AddUint16LengthPrefixed(func(b *cryptobyte.Builder) {
+		b.AddBytes(c.PublicKeyBytes)
+	})
+	b.AddUint16LengthPrefixed(func(b *cryptobyte.Builder) {
+		for _, s := range c.Suites {
+			b.AddUint16(uint16(s.KDFID))
+			b.AddUint16(uint16(s.AEADID))
+		}
+	})
 
-	result, err := b.Bytes()
-	if err != nil {
-		panic(err)
-	}
-
-	return result
+	return b.BytesOrPanic()
 }
 
 type EncapsulatedRequest struct {
@@ -88,6 +100,63 @@ type EncapsulatedRequest struct {
 	ct     []byte
 }
 
+// Encapsulated Request {
+// 	Key Identifier (8),
+// 	KDF Identifier (16),
+// 	AEAD Identifier (16),
+// 	Encapsulated KEM Shared Secret (..),
+// 	AEAD-Protected Request (..),
+// }
+func (r EncapsulatedRequest) Marshal() []byte {
+	b := cryptobyte.NewBuilder(nil)
+
+	b.AddUint8(r.keyID)
+	b.AddUint16(uint16(r.kdfID))
+	b.AddUint16(uint16(r.aeadID))
+	b.AddBytes(r.enc)
+	b.AddBytes(r.ct)
+
+	return b.BytesOrPanic()
+}
+
+func UnmarshalEncapsulatedRequest(enc []byte) (EncapsulatedRequest, error) {
+	b := bytes.NewBuffer(enc)
+
+	keyID, err := b.ReadByte()
+	if err != nil {
+		return EncapsulatedRequest{}, err
+	}
+
+	kdfIDBuffer := make([]byte, 2)
+	_, err = b.Read(kdfIDBuffer)
+	if err != nil {
+		return EncapsulatedRequest{}, err
+	}
+
+	aeadIDBuffer := make([]byte, 2)
+	_, err = b.Read(aeadIDBuffer)
+	if err != nil {
+		return EncapsulatedRequest{}, err
+	}
+
+	// TODO(caw): this is terrible... we should just put the KEMID here to make parsing easier
+	key := make([]byte, 32)
+	_, err = b.Read(key)
+	if err != nil {
+		return EncapsulatedRequest{}, err
+	}
+
+	ct := b.Bytes()
+
+	return EncapsulatedRequest{
+		keyID:  uint8(keyID),
+		kdfID:  hpke.KDFID(binary.BigEndian.Uint16(kdfIDBuffer)),
+		aeadID: hpke.AEADID(binary.BigEndian.Uint16(aeadIDBuffer)),
+		enc:    key,
+		ct:     ct,
+	}, nil
+}
+
 type EncapsulatedRequestContext struct {
 	enc     []byte
 	suite   hpke.CipherSuite
@@ -95,8 +164,21 @@ type EncapsulatedRequestContext struct {
 }
 
 type EncapsulatedResponse struct {
-	nonce []byte
-	ct    []byte
+	raw []byte
+}
+
+// Encapsulated Response {
+// 	Nonce (Nk),
+// 	AEAD-Protected Response (..),
+// }
+func (r EncapsulatedResponse) Marshal() []byte {
+	return r.raw
+}
+
+func UnmarshalEncapsulatedResponse(enc []byte) (EncapsulatedResponse, error) {
+	return EncapsulatedResponse{
+		raw: enc,
+	}, nil
 }
 
 type EncapsulatedResponseContext struct {
@@ -125,7 +207,7 @@ func (c OHTTPClient) EncapsulateRequest(request []byte) (EncapsulatedRequest, En
 		return EncapsulatedRequest{}, EncapsulatedRequestContext{}, err
 	}
 
-	// TODO(caw): we should disucss why we don't fold in the KEMID
+	// TODO(caw): we should discuss why we don't fold in the KEMID
 	buffer := make([]byte, 2)
 	binary.BigEndian.PutUint16(buffer, uint16(kdfID))
 	aad := append([]byte{c.config.ID}, buffer...)
@@ -149,7 +231,7 @@ func (c OHTTPClient) EncapsulateRequest(request []byte) (EncapsulatedRequest, En
 
 func (c EncapsulatedRequestContext) DecapsulateResponse(response EncapsulatedResponse) ([]byte, error) {
 	secret := c.context.Export([]byte("response"), c.suite.AEAD.KeySize())
-	prk := c.suite.KDF.Extract(append(c.enc, response.nonce...), secret)
+	prk := c.suite.KDF.Extract(append(c.enc, response.raw[:c.suite.AEAD.KeySize()]...), secret)
 	key := c.suite.KDF.Expand(prk, []byte("key"), c.suite.AEAD.KeySize())
 	nonce := c.suite.KDF.Expand(prk, []byte("nonce"), c.suite.AEAD.NonceSize())
 
@@ -158,7 +240,7 @@ func (c EncapsulatedRequestContext) DecapsulateResponse(response EncapsulatedRes
 		return nil, err
 	}
 
-	return cipher.Open(nil, nonce, response.ct, nil)
+	return cipher.Open(nil, nonce, response.raw[c.suite.AEAD.KeySize():], nil)
 }
 
 type OHTTPServer struct {
@@ -228,7 +310,6 @@ func (c DecapsulateRequestContext) EncapsulateResponse(response []byte) (Encapsu
 	ct := cipher.Seal(nil, nonce, response, nil)
 
 	return EncapsulatedResponse{
-		nonce: responseNonce,
-		ct:    ct,
+		raw: append(responseNonce, ct...),
 	}, nil
 }
