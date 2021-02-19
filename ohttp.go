@@ -79,9 +79,7 @@ func (c PublicConfig) Marshal() []byte {
 
 	b.AddUint8(c.ID)
 	b.AddUint16(uint16(c.KEMID))
-	b.AddUint16LengthPrefixed(func(b *cryptobyte.Builder) {
-		b.AddBytes(c.PublicKeyBytes)
-	})
+	b.AddBytes(c.PublicKeyBytes)
 	b.AddUint16LengthPrefixed(func(b *cryptobyte.Builder) {
 		for _, s := range c.Suites {
 			b.AddUint16(uint16(s.KDFID))
@@ -94,6 +92,7 @@ func (c PublicConfig) Marshal() []byte {
 
 type EncapsulatedRequest struct {
 	keyID  uint8
+	kemID  hpke.KEMID
 	kdfID  hpke.KDFID
 	aeadID hpke.AEADID
 	enc    []byte
@@ -102,15 +101,17 @@ type EncapsulatedRequest struct {
 
 // Encapsulated Request {
 // 	Key Identifier (8),
+// 	KEM Identifier (16),
 // 	KDF Identifier (16),
 // 	AEAD Identifier (16),
-// 	Encapsulated KEM Shared Secret (..),
+// 	Encapsulated KEM Shared Secret (Nenc),
 // 	AEAD-Protected Request (..),
 // }
 func (r EncapsulatedRequest) Marshal() []byte {
 	b := cryptobyte.NewBuilder(nil)
 
 	b.AddUint8(r.keyID)
+	b.AddUint16(uint16(r.kemID))
 	b.AddUint16(uint16(r.kdfID))
 	b.AddUint16(uint16(r.aeadID))
 	b.AddBytes(r.enc)
@@ -127,20 +128,33 @@ func UnmarshalEncapsulatedRequest(enc []byte) (EncapsulatedRequest, error) {
 		return EncapsulatedRequest{}, err
 	}
 
+	kemIDBuffer := make([]byte, 2)
+	_, err = b.Read(kemIDBuffer)
+	if err != nil {
+		return EncapsulatedRequest{}, err
+	}
+	kemID := hpke.KEMID(binary.BigEndian.Uint16(kemIDBuffer))
+
 	kdfIDBuffer := make([]byte, 2)
 	_, err = b.Read(kdfIDBuffer)
 	if err != nil {
 		return EncapsulatedRequest{}, err
 	}
+	kdfID := hpke.KDFID(binary.BigEndian.Uint16(kdfIDBuffer))
 
 	aeadIDBuffer := make([]byte, 2)
 	_, err = b.Read(aeadIDBuffer)
 	if err != nil {
 		return EncapsulatedRequest{}, err
 	}
+	aeadID := hpke.AEADID(binary.BigEndian.Uint16(aeadIDBuffer))
 
-	// TODO(caw): this is terrible... we should just put the KEMID here to make parsing easier
-	key := make([]byte, 32)
+	suite, err := hpke.AssembleCipherSuite(kemID, kdfID, aeadID)
+	if err != nil {
+		return EncapsulatedRequest{}, err
+	}
+
+	key := make([]byte, suite.KEM.PublicKeySize())
 	_, err = b.Read(key)
 	if err != nil {
 		return EncapsulatedRequest{}, err
@@ -150,8 +164,9 @@ func UnmarshalEncapsulatedRequest(enc []byte) (EncapsulatedRequest, error) {
 
 	return EncapsulatedRequest{
 		keyID:  uint8(keyID),
-		kdfID:  hpke.KDFID(binary.BigEndian.Uint16(kdfIDBuffer)),
-		aeadID: hpke.AEADID(binary.BigEndian.Uint16(aeadIDBuffer)),
+		kemID:  kemID,
+		kdfID:  kdfID,
+		aeadID: aeadID,
 		enc:    key,
 		ct:     ct,
 	}, nil
@@ -189,6 +204,7 @@ type OHTTPClient struct {
 }
 
 func (c OHTTPClient) EncapsulateRequest(request []byte) (EncapsulatedRequest, EncapsulatedRequestContext, error) {
+	kemID := c.config.KEMID
 	kdfID := c.config.Suites[0].KDFID
 	aeadID := c.config.Suites[0].AEADID
 
@@ -207,10 +223,11 @@ func (c OHTTPClient) EncapsulateRequest(request []byte) (EncapsulatedRequest, En
 		return EncapsulatedRequest{}, EncapsulatedRequestContext{}, err
 	}
 
-	// TODO(caw): we should discuss why we don't fold in the KEMID
 	buffer := make([]byte, 2)
-	binary.BigEndian.PutUint16(buffer, uint16(kdfID))
+	binary.BigEndian.PutUint16(buffer, uint16(kemID))
 	aad := append([]byte{c.config.ID}, buffer...)
+	binary.BigEndian.PutUint16(buffer, uint16(kdfID))
+	aad = append(aad, buffer...)
 	binary.BigEndian.PutUint16(buffer, uint16(aeadID))
 	aad = append(aad, buffer...)
 
@@ -219,6 +236,7 @@ func (c OHTTPClient) EncapsulateRequest(request []byte) (EncapsulatedRequest, En
 	return EncapsulatedRequest{
 			keyID:  c.config.ID,
 			kdfID:  kdfID,
+			kemID:  kemID,
 			aeadID: aeadID,
 			enc:    enc,
 			ct:     ct,
@@ -266,8 +284,10 @@ func (s OHTTPServer) DecapsulateRequest(req EncapsulatedRequest) ([]byte, Decaps
 	}
 
 	buffer := make([]byte, 2)
-	binary.BigEndian.PutUint16(buffer, uint16(req.kdfID))
+	binary.BigEndian.PutUint16(buffer, uint16(config.config.KEMID))
 	aad := append([]byte{req.keyID}, buffer...)
+	binary.BigEndian.PutUint16(buffer, uint16(req.kdfID))
+	aad = append(aad, buffer...)
 	binary.BigEndian.PutUint16(buffer, uint16(req.aeadID))
 	aad = append(aad, buffer...)
 

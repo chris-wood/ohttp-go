@@ -2,11 +2,8 @@ package ohttp
 
 import (
 	"bytes"
-	"encoding/hex"
-	"fmt"
 	"io/ioutil"
 	"net/http"
-	"net/http/httputil"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -115,17 +112,15 @@ func TestRequestMarshal(t *testing.T) {
 	// req.Header.Add("Host", "www.example.com") // TODO(caw): fix :authority pseudoheader conflict
 	req.Header.Add("Accept-Language", "en, mi")
 
-	r := BinaryRequest(*req)
-	enc, err := r.Marshal()
-	require.Nil(t, err, "BinaryRequest Marshal failed")
+	// r := BinaryRequest(*req)
+	// enc, err := r.Marshal()
+	// require.Nil(t, err, "BinaryRequest Marshal failed")
+	// fmt.Printf("%s", hex.Dump(enc))
+	// fmt.Println(hex.EncodeToString(enc))
 
-	fmt.Printf("%s", hex.Dump(enc))
-
-	fmt.Println(hex.EncodeToString(enc))
-
-	reqEnc, err := httputil.DumpRequest(req, true)
-	require.Nil(t, err, "Dump request failed")
-	fmt.Println(string(reqEnc))
+	// reqEnc, err := httputil.DumpRequest(req, true)
+	// require.Nil(t, err, "Dump request failed")
+	// fmt.Println(string(reqEnc))
 }
 
 func TestResponseMarshal(t *testing.T) {
@@ -140,17 +135,13 @@ func TestResponseMarshal(t *testing.T) {
 
 	require.Equal(t, resp.StatusCode, http.StatusOK, "Incorrect status code")
 
-	r := BinaryResponse(resp)
-	enc, err := r.Marshal()
-	require.Nil(t, err, "BinaryResponse Marshal failed")
+	// r := BinaryResponse(resp)
+	// enc, err := r.Marshal()
+	// require.Nil(t, err, "BinaryResponse Marshal failed")
+	// fmt.Printf("%s", hex.Dump(enc))
+	// fmt.Println(hex.EncodeToString(enc))
 
-	fmt.Printf("%s", hex.Dump(enc))
-
-	fmt.Println(hex.EncodeToString(enc))
-
-	respEnc, err := httputil.DumpResponse(&resp, true)
-	require.Nil(t, err, "Dump response failed")
-	fmt.Println(string(respEnc))
+	// respEnc, err := httputil.DumpResponse(&resp, true)
+	// require.Nil(t, err, "Dump response failed")
+	// fmt.Println(string(respEnc))
 }
-
-// TODO(caw): write request/response marshal tests
