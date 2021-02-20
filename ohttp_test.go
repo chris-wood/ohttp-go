@@ -357,27 +357,27 @@ func TestVectorVerify(t *testing.T) {
 	verifyTestVectors(t, encoded)
 }
 
-func TestInterop(t *testing.T) {
-	configSeed := mustUnhex(t, "634b751e5b081ba2836804a466d318811cbf9fe1f65b4249e83c2b7870b2332f")
-	privateConfig, err := NewConfigFromSeed(hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128, configSeed)
-	require.Nil(t, err, "NewConfigFromSeed failed")
+// func TestInterop(t *testing.T) {
+// 	configSeed := mustUnhex(t, "634b751e5b081ba2836804a466d318811cbf9fe1f65b4249e83c2b7870b2332f")
+// 	privateConfig, err := NewConfigFromSeed(hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128, configSeed)
+// 	require.Nil(t, err, "NewConfigFromSeed failed")
 
-	encodedRequest := mustUnhex(t, "000001000192c1da751e16aaa1426ca3b2fd8e97a05a8e53b67d56bd9b9c573d3e161d05697b153ac23c28b3ed63dbd551f047e412b5083d3093a96de751970fd3d30008423580e3f3a4340fc6dcdd0d6c266592730bf6867743cb6776d52889c030397c7b2dcda6d915630f22c9dc6fe3ae2fb6c110bb2df6a864fcd1d65bf0a35f95771d81f2b2844f666669bfc83e6f1df2c9bd05ff2fea7a2956a608fd048ed7ca27b025b0d2afc70088ce7e13e3995edaffef8259569140b670")
-	encapRequest, err := UnmarshalEncapsulatedRequest(encodedRequest)
-	require.Nil(t, err, "UnmarshalEncapsulatedRequest failed")
+// 	encodedRequest := mustUnhex(t, "000001000192c1da751e16aaa1426ca3b2fd8e97a05a8e53b67d56bd9b9c573d3e161d05697b153ac23c28b3ed63dbd551f047e412b5083d3093a96de751970fd3d30008423580e3f3a4340fc6dcdd0d6c266592730bf6867743cb6776d52889c030397c7b2dcda6d915630f22c9dc6fe3ae2fb6c110bb2df6a864fcd1d65bf0a35f95771d81f2b2844f666669bfc83e6f1df2c9bd05ff2fea7a2956a608fd048ed7ca27b025b0d2afc70088ce7e13e3995edaffef8259569140b670")
+// 	encapRequest, err := UnmarshalEncapsulatedRequest(encodedRequest)
+// 	require.Nil(t, err, "UnmarshalEncapsulatedRequest failed")
 
-	// client := OHTTPClient{privateConfig.config}
-	server := OHTTPServer{
-		keyMap: map[uint8]PrivateConfig{
-			privateConfig.config.ID: privateConfig,
-		},
-	}
+// 	// client := OHTTPClient{privateConfig.config}
+// 	server := OHTTPServer{
+// 		keyMap: map[uint8]PrivateConfig{
+// 			privateConfig.config.ID: privateConfig,
+// 		},
+// 	}
 
-	request, respContext, err := server.DecapsulateRequest(encapRequest)
-	require.Nil(t, err, "DecapsulateRequest failed")
+// 	request, respContext, err := server.DecapsulateRequest(encapRequest)
+// 	require.Nil(t, err, "DecapsulateRequest failed")
 
-	resp, err := respContext.EncapsulateResponse(request)
-	require.Nil(t, err, "EncapsulateResponse failed")
+// 	resp, err := respContext.EncapsulateResponse(request)
+// 	require.Nil(t, err, "EncapsulateResponse failed")
 
-	fmt.Println("resp:", hex.EncodeToString(resp.Marshal()))
-}
+// 	fmt.Println("resp:", hex.EncodeToString(resp.Marshal()))
+// }
