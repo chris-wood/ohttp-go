@@ -55,6 +55,10 @@ type PrivateConfig struct {
 	pk     hpke.KEMPublicKey
 }
 
+func (c PrivateConfig) Config() PublicConfig {
+	return c.config
+}
+
 func NewConfigFromSeed(kemID hpke.KEMID, kdfID hpke.KDFID, aeadID hpke.AEADID, seed []byte) (PrivateConfig, error) {
 	suite, err := hpke.AssembleCipherSuite(kemID, kdfID, aeadID)
 	if err != nil {
