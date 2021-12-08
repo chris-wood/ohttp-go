@@ -23,6 +23,31 @@ type PublicConfig struct {
 	PublicKeyBytes []byte
 }
 
+func (c PublicConfig) IsEqual(o PublicConfig) bool {
+	if c.ID != o.ID {
+		return false
+	}
+	if c.KEMID != o.KEMID {
+		return false
+	}
+	if !bytes.Equal(c.PublicKeyBytes, o.PublicKeyBytes) {
+		return false
+	}
+	if len(c.Suites) != len(o.Suites) {
+		return false
+	}
+	for i, s := range c.Suites {
+		if s.KDFID != o.Suites[i].KDFID {
+			return false
+		}
+		if s.AEADID != o.Suites[i].AEADID {
+			return false
+		}
+	}
+
+	return true
+}
+
 type PrivateConfig struct {
 	seed   []byte
 	config PublicConfig
@@ -88,6 +113,62 @@ func (c PublicConfig) Marshal() []byte {
 	})
 
 	return b.BytesOrPanic()
+}
+
+func UnmarshalPublicConfig(data []byte) (PublicConfig, error) {
+	s := cryptobyte.String(data)
+
+	var id uint8
+	var kemID uint16
+	if !s.ReadUint8(&id) ||
+		!s.ReadUint16(&kemID) {
+		return PublicConfig{}, fmt.Errorf("Invalid config")
+	}
+
+	kem := hpke.KEMID(kemID)
+	suite, err := hpke.AssembleCipherSuite(kem, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128)
+	if err != nil {
+		return PublicConfig{}, fmt.Errorf("Invalid config")
+	}
+
+	publicKeyBytes := make([]byte, suite.KEM.PublicKeySize())
+	if !s.ReadBytes(&publicKeyBytes, len(publicKeyBytes)) {
+		return PublicConfig{}, fmt.Errorf("Invalid config")
+	}
+
+	var cipherSuites cryptobyte.String
+	if !s.ReadUint16LengthPrefixed(&cipherSuites) {
+		return PublicConfig{}, fmt.Errorf("Invalid config")
+	}
+	suites := []ConfigCipherSuite{}
+	for !cipherSuites.Empty() {
+		var kdfID uint16
+		var aeadID uint16
+		if !cipherSuites.ReadUint16(&kdfID) ||
+			!cipherSuites.ReadUint16(&aeadID) {
+			return PublicConfig{}, fmt.Errorf("Invalid config")
+		}
+
+		// Sanity check validity of the KDF and AEAD values
+		kdf := hpke.KDFID(kdfID)
+		aead := hpke.AEADID(aeadID)
+		_, err := hpke.AssembleCipherSuite(kem, kdf, aead)
+		if err != nil {
+			return PublicConfig{}, fmt.Errorf("Invalid config")
+		}
+
+		suites = append(suites, ConfigCipherSuite{
+			KDFID:  kdf,
+			AEADID: aead,
+		})
+	}
+
+	return PublicConfig{
+		ID:             id,
+		KEMID:          kem,
+		PublicKeyBytes: publicKeyBytes,
+		Suites:         suites,
+	}, nil
 }
 
 type EncapsulatedRequest struct {

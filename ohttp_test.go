@@ -18,6 +18,18 @@ const (
 	inputTestVectorEnvironmentKey  = "OHTTP_TEST_VECTORS_IN"
 )
 
+func TestConfigSerialize(t *testing.T) {
+	privateConfig, err := NewConfig(hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128)
+	require.Nil(t, err, "CreatePrivateConfig failed")
+
+	config := privateConfig.config
+
+	serializedConfig := config.Marshal()
+	recoveredConfig, err := UnmarshalPublicConfig(serializedConfig)
+	require.Nil(t, err, "UnmarshalPublicConfig failed")
+	require.True(t, config.IsEqual(recoveredConfig), "Config mismatch")
+}
+
 func TestRoundTrip(t *testing.T) {
 	privateConfig, err := NewConfig(hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128)
 	require.Nil(t, err, "CreatePrivateConfig failed")
