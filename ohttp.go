@@ -59,6 +59,10 @@ func (c PrivateConfig) Config() PublicConfig {
 	return c.config
 }
 
+func (c PrivateConfig) PrivateKey() hpke.KEMPrivateKey {
+	return c.sk
+}
+
 func NewConfigFromSeed(kemID hpke.KEMID, kdfID hpke.KDFID, aeadID hpke.AEADID, seed []byte) (PrivateConfig, error) {
 	suite, err := hpke.AssembleCipherSuite(kemID, kdfID, aeadID)
 	if err != nil {
@@ -347,8 +351,8 @@ func (c EncapsulatedRequestContext) DecapsulateResponse(response EncapsulatedRes
 }
 
 type OHTTPServer struct {
-	keyMap map[uint8]PrivateConfig
 	// map from IDs to private key(s)
+	keyMap map[uint8]PrivateConfig
 }
 
 type DecapsulateRequestContext struct {
