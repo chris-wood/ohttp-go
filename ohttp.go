@@ -307,7 +307,7 @@ func (c OHTTPClient) EncapsulateRequest(request []byte) (EncapsulatedRequest, En
 		return EncapsulatedRequest{}, EncapsulatedRequestContext{}, err
 	}
 
-	enc, context, err := hpke.SetupBaseS(suite, rand.Reader, pkR, []byte("request"))
+	enc, context, err := hpke.SetupBaseS(suite, rand.Reader, pkR, []byte("ohttp request"))
 	if err != nil {
 		return EncapsulatedRequest{}, EncapsulatedRequestContext{}, err
 	}
@@ -337,7 +337,7 @@ func (c OHTTPClient) EncapsulateRequest(request []byte) (EncapsulatedRequest, En
 }
 
 func (c EncapsulatedRequestContext) DecapsulateResponse(response EncapsulatedResponse) ([]byte, error) {
-	secret := c.context.Export([]byte("response"), c.suite.AEAD.KeySize())
+	secret := c.context.Export([]byte("ohttp response"), c.suite.AEAD.KeySize())
 	prk := c.suite.KDF.Extract(append(c.enc, response.raw[:c.suite.AEAD.KeySize()]...), secret)
 	key := c.suite.KDF.Expand(prk, []byte("key"), c.suite.AEAD.KeySize())
 	nonce := c.suite.KDF.Expand(prk, []byte("nonce"), c.suite.AEAD.NonceSize())
@@ -380,7 +380,7 @@ func (s OHTTPServer) DecapsulateRequest(req EncapsulatedRequest) ([]byte, Decaps
 	binary.BigEndian.PutUint16(buffer, uint16(req.aeadID))
 	aad = append(aad, buffer...)
 
-	context, err := hpke.SetupBaseR(suite, config.sk, req.enc, []byte("request"))
+	context, err := hpke.SetupBaseR(suite, config.sk, req.enc, []byte("ohttp request"))
 	if err != nil {
 		return nil, DecapsulateRequestContext{}, err
 	}
@@ -399,7 +399,7 @@ func (s OHTTPServer) DecapsulateRequest(req EncapsulatedRequest) ([]byte, Decaps
 
 func (c DecapsulateRequestContext) EncapsulateResponse(response []byte) (EncapsulatedResponse, error) {
 	// TODO(caw): implement max(Nk, Nn)
-	secret := c.context.Export([]byte("response"), c.suite.AEAD.KeySize())
+	secret := c.context.Export([]byte("ohttp response"), c.suite.AEAD.KeySize())
 
 	responseNonce := make([]byte, c.suite.AEAD.KeySize())
 	_, err := rand.Read(responseNonce)
