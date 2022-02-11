@@ -11,6 +11,13 @@ import (
 	"golang.org/x/crypto/cryptobyte"
 )
 
+var (
+	labelRequest       = "message/bhttp request"
+	labelResponse      = "message/bhttp response"
+	labelResponseKey   = "key"
+	labelResponseNonce = "nonce"
+)
+
 type ConfigCipherSuite struct {
 	KDFID  hpke.KDFID
 	AEADID hpke.AEADID
@@ -307,7 +314,7 @@ func (c OHTTPClient) EncapsulateRequest(request []byte) (EncapsulatedRequest, En
 		return EncapsulatedRequest{}, EncapsulatedRequestContext{}, err
 	}
 
-	enc, context, err := hpke.SetupBaseS(suite, rand.Reader, pkR, []byte("ohttp request"))
+	enc, context, err := hpke.SetupBaseS(suite, rand.Reader, pkR, []byte(labelRequest))
 	if err != nil {
 		return EncapsulatedRequest{}, EncapsulatedRequestContext{}, err
 	}
@@ -337,16 +344,35 @@ func (c OHTTPClient) EncapsulateRequest(request []byte) (EncapsulatedRequest, En
 }
 
 func (c EncapsulatedRequestContext) DecapsulateResponse(response EncapsulatedResponse) ([]byte, error) {
-	secret := c.context.Export([]byte("ohttp response"), c.suite.AEAD.KeySize())
-	prk := c.suite.KDF.Extract(append(c.enc, response.raw[:c.suite.AEAD.KeySize()]...), secret)
-	key := c.suite.KDF.Expand(prk, []byte("key"), c.suite.AEAD.KeySize())
-	nonce := c.suite.KDF.Expand(prk, []byte("nonce"), c.suite.AEAD.NonceSize())
+	// secret = context.Export("message/bhttp response", Nk)
+	secret := c.context.Export([]byte(labelResponse), c.suite.AEAD.KeySize())
+
+	// response_nonce = random(max(Nn, Nk)), taken from the encapsualted response
+	responseNonceLen := max(c.suite.AEAD.KeySize(), c.suite.AEAD.NonceSize())
+	responseNonce := make([]byte, responseNonceLen)
+	_, err := rand.Read(responseNonce)
+	if err != nil {
+		return nil, err
+	}
+
+	// salt = concat(enc, response_nonce)
+	salt := append(c.enc, response.raw[:responseNonceLen]...)
+
+	// prk = Extract(salt, secret)
+	prk := c.suite.KDF.Extract(salt, secret)
+
+	// aead_key = Expand(prk, "key", Nk)
+	key := c.suite.KDF.Expand(prk, []byte(labelResponseKey), c.suite.AEAD.KeySize())
+
+	// aead_nonce = Expand(prk, "nonce", Nn)
+	nonce := c.suite.KDF.Expand(prk, []byte(labelResponseNonce), c.suite.AEAD.NonceSize())
 
 	cipher, err := c.suite.AEAD.New(key)
 	if err != nil {
 		return nil, err
 	}
 
+	// reponse, error = Open(aead_key, aead_nonce, "", ct)
 	return cipher.Open(nil, nonce, response.raw[c.suite.AEAD.KeySize():], nil)
 }
 
@@ -380,7 +406,7 @@ func (s OHTTPServer) DecapsulateRequest(req EncapsulatedRequest) ([]byte, Decaps
 	binary.BigEndian.PutUint16(buffer, uint16(req.aeadID))
 	aad = append(aad, buffer...)
 
-	context, err := hpke.SetupBaseR(suite, config.sk, req.enc, []byte("ohttp request"))
+	context, err := hpke.SetupBaseR(suite, config.sk, req.enc, []byte(labelRequest))
 	if err != nil {
 		return nil, DecapsulateRequestContext{}, err
 	}
@@ -397,28 +423,50 @@ func (s OHTTPServer) DecapsulateRequest(req EncapsulatedRequest) ([]byte, Decaps
 	}, nil
 }
 
-func (c DecapsulateRequestContext) EncapsulateResponse(response []byte) (EncapsulatedResponse, error) {
-	// TODO(caw): implement max(Nk, Nn)
-	secret := c.context.Export([]byte("ohttp response"), c.suite.AEAD.KeySize())
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
 
-	responseNonce := make([]byte, c.suite.AEAD.KeySize())
+func encapsulateResponse(context *hpke.ReceiverContext, response, enc []byte, suite hpke.CipherSuite) (EncapsulatedResponse, error) {
+	// secret = context.Export("message/bhttp response", Nk)
+	secret := context.Export([]byte(labelResponse), suite.AEAD.KeySize())
+
+	// response_nonce = random(max(Nn, Nk))
+	responseNonceLen := max(suite.AEAD.KeySize(), suite.AEAD.NonceSize())
+	responseNonce := make([]byte, responseNonceLen)
 	_, err := rand.Read(responseNonce)
 	if err != nil {
 		return EncapsulatedResponse{}, err
 	}
 
-	prk := c.suite.KDF.Extract(append(c.enc, responseNonce...), secret)
-	key := c.suite.KDF.Expand(prk, []byte("key"), c.suite.AEAD.KeySize())
-	nonce := c.suite.KDF.Expand(prk, []byte("nonce"), c.suite.AEAD.NonceSize())
+	// salt = concat(enc, response_nonce)
+	salt := append(append(enc, responseNonce...))
 
-	cipher, err := c.suite.AEAD.New(key)
+	// prk = Extract(salt, secret)
+	prk := suite.KDF.Extract(salt, secret)
+
+	// aead_key = Expand(prk, "key", Nk)
+	key := suite.KDF.Expand(prk, []byte(labelResponseKey), suite.AEAD.KeySize())
+
+	// aead_nonce = Expand(prk, "nonce", Nn)
+	nonce := suite.KDF.Expand(prk, []byte(labelResponseNonce), suite.AEAD.NonceSize())
+
+	// ct = Seal(aead_key, aead_nonce, "", response)
+	cipher, err := suite.AEAD.New(key)
 	if err != nil {
 		return EncapsulatedResponse{}, err
 	}
-
 	ct := cipher.Seal(nil, nonce, response, nil)
 
+	// enc_response = concat(response_nonce, ct)
 	return EncapsulatedResponse{
 		raw: append(responseNonce, ct...),
 	}, nil
+}
+
+func (c DecapsulateRequestContext) EncapsulateResponse(response []byte) (EncapsulatedResponse, error) {
+	return encapsulateResponse(c.context, response, c.enc, c.suite)
 }
