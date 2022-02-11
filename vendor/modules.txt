@@ -1,6 +1,6 @@
 # git.schwanenlied.me/yawning/x448.git v0.0.0-20170617130356-01b048fb03d6
 git.schwanenlied.me/yawning/x448.git
-# github.com/cisco/go-hpke v0.0.0-20201215202025-9cebdf8f33d4
+# github.com/cisco/go-hpke v0.0.0-20210524174249-dd22b38cf960
 ## explicit
 github.com/cisco/go-hpke
 # github.com/cisco/go-tls-syntax v0.0.0-20200617162716-46b0cfb76b9b

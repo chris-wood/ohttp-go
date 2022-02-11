@@ -15,7 +15,7 @@ ordered_keys = [
 ]
 
 ordered_encryption_keys = [
-    "plaintext", "aad", "nonce", "ciphertext",
+    "pt", "aad", "nonce", "ct",
 ]
 
 ordered_export_keys = [
