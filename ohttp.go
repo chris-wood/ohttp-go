@@ -314,20 +314,23 @@ func (c OHTTPClient) EncapsulateRequest(request []byte) (EncapsulatedRequest, En
 		return EncapsulatedRequest{}, EncapsulatedRequestContext{}, err
 	}
 
-	enc, context, err := hpke.SetupBaseS(suite, rand.Reader, pkR, []byte(labelRequest))
+	info := []byte(labelRequest)
+	info = append(info, 0x00)
+	info = append(info, c.config.ID)
+	buffer := make([]byte, 2)
+	binary.BigEndian.PutUint16(buffer, uint16(kemID))
+	info = append(info, buffer...)
+	binary.BigEndian.PutUint16(buffer, uint16(kdfID))
+	info = append(info, buffer...)
+	binary.BigEndian.PutUint16(buffer, uint16(aeadID))
+	info = append(info, buffer...)
+
+	enc, context, err := hpke.SetupBaseS(suite, rand.Reader, pkR, info)
 	if err != nil {
 		return EncapsulatedRequest{}, EncapsulatedRequestContext{}, err
 	}
 
-	buffer := make([]byte, 2)
-	binary.BigEndian.PutUint16(buffer, uint16(kemID))
-	aad := append([]byte{c.config.ID}, buffer...)
-	binary.BigEndian.PutUint16(buffer, uint16(kdfID))
-	aad = append(aad, buffer...)
-	binary.BigEndian.PutUint16(buffer, uint16(aeadID))
-	aad = append(aad, buffer...)
-
-	ct := context.Seal(aad, request)
+	ct := context.Seal(nil, request)
 
 	return EncapsulatedRequest{
 			keyID:  c.config.ID,
@@ -398,20 +401,23 @@ func (s OHTTPServer) DecapsulateRequest(req EncapsulatedRequest) ([]byte, Decaps
 		return nil, DecapsulateRequestContext{}, err
 	}
 
+	info := []byte(labelRequest)
+	info = append(info, 0x00)
+	info = append(info, req.keyID)
 	buffer := make([]byte, 2)
-	binary.BigEndian.PutUint16(buffer, uint16(config.config.KEMID))
-	aad := append([]byte{req.keyID}, buffer...)
+	binary.BigEndian.PutUint16(buffer, uint16(req.kemID))
+	info = append(info, buffer...)
 	binary.BigEndian.PutUint16(buffer, uint16(req.kdfID))
-	aad = append(aad, buffer...)
+	info = append(info, buffer...)
 	binary.BigEndian.PutUint16(buffer, uint16(req.aeadID))
-	aad = append(aad, buffer...)
+	info = append(info, buffer...)
 
-	context, err := hpke.SetupBaseR(suite, config.sk, req.enc, []byte(labelRequest))
+	context, err := hpke.SetupBaseR(suite, config.sk, req.enc, info)
 	if err != nil {
 		return nil, DecapsulateRequestContext{}, err
 	}
 
-	raw, err := context.Open(aad, req.ct)
+	raw, err := context.Open(nil, req.ct)
 	if err != nil {
 		return nil, DecapsulateRequestContext{}, err
 	}
