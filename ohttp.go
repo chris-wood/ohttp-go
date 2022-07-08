@@ -297,6 +297,7 @@ type EncapsulatedResponseContext struct {
 
 type OHTTPClient struct {
 	config PublicConfig
+	skE    hpke.KEMPrivateKey
 }
 
 func (c OHTTPClient) EncapsulateRequest(request []byte) (EncapsulatedRequest, EncapsulatedRequestContext, error) {
@@ -312,6 +313,10 @@ func (c OHTTPClient) EncapsulateRequest(request []byte) (EncapsulatedRequest, En
 	pkR, err := suite.KEM.DeserializePublicKey(c.config.PublicKeyBytes)
 	if err != nil {
 		return EncapsulatedRequest{}, EncapsulatedRequestContext{}, err
+	}
+
+	if c.skE != nil {
+		suite.KEM.SetEphemeralKeyPair(c.skE)
 	}
 
 	info := []byte(labelRequest)
@@ -436,17 +441,9 @@ func max(a, b int) int {
 	return b
 }
 
-func encapsulateResponse(context *hpke.ReceiverContext, response, enc []byte, suite hpke.CipherSuite) (EncapsulatedResponse, error) {
+func encapsulateResponse(context *hpke.ReceiverContext, response, responseNonce []byte, enc []byte, suite hpke.CipherSuite) (EncapsulatedResponse, error) {
 	// secret = context.Export("message/bhttp response", Nk)
 	secret := context.Export([]byte(labelResponse), suite.AEAD.KeySize())
-
-	// response_nonce = random(max(Nn, Nk))
-	responseNonceLen := max(suite.AEAD.KeySize(), suite.AEAD.NonceSize())
-	responseNonce := make([]byte, responseNonceLen)
-	_, err := rand.Read(responseNonce)
-	if err != nil {
-		return EncapsulatedResponse{}, err
-	}
 
 	// salt = concat(enc, response_nonce)
 	salt := append(append(enc, responseNonce...))
@@ -474,5 +471,17 @@ func encapsulateResponse(context *hpke.ReceiverContext, response, enc []byte, su
 }
 
 func (c DecapsulateRequestContext) EncapsulateResponse(response []byte) (EncapsulatedResponse, error) {
-	return encapsulateResponse(c.context, response, c.enc, c.suite)
+	// response_nonce = random(max(Nn, Nk))
+	responseNonceLen := max(c.suite.AEAD.KeySize(), c.suite.AEAD.NonceSize())
+	responseNonce := make([]byte, responseNonceLen)
+	_, err := rand.Read(responseNonce)
+	if err != nil {
+		return EncapsulatedResponse{}, err
+	}
+
+	return encapsulateResponse(c.context, response, responseNonce, c.enc, c.suite)
+}
+
+func (c DecapsulateRequestContext) encapsulateResponseWithResponseNonce(response []byte, responseNonce []byte) (EncapsulatedResponse, error) {
+	return encapsulateResponse(c.context, response, responseNonce, c.enc, c.suite)
 }

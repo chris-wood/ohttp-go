@@ -71,7 +71,7 @@ func (s dhkemScheme) DeserializePrivateKey(enc []byte) (KEMPrivateKey, error) {
 	return s.group.DeserializePrivateKey(enc)
 }
 
-func (s *dhkemScheme) setEphemeralKeyPair(skE KEMPrivateKey) {
+func (s *dhkemScheme) SetEphemeralKeyPair(skE KEMPrivateKey) {
 	s.skE = skE
 }
 
@@ -734,7 +734,7 @@ func (s sikeScheme) PrivateKeySize() int {
 	return rawPriv.Size()
 }
 
-func (s sikeScheme) setEphemeralKeyPair(skE KEMPrivateKey) {
+func (s sikeScheme) SetEphemeralKeyPair(skE KEMPrivateKey) {
 	panic("SIKE cannot use a pre-set ephemeral key pair")
 }
 
