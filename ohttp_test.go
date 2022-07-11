@@ -1,6 +1,7 @@
 package ohttp
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -33,7 +34,7 @@ func TestRoundTrip(t *testing.T) {
 	privateConfig, err := NewConfig(hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128)
 	require.Nil(t, err, "CreatePrivateConfig failed")
 
-	client := OHTTPClient{privateConfig.config}
+	client := OHTTPClient{config: privateConfig.config}
 	server := OHTTPServer{
 		keyMap: map[uint8]PrivateConfig{
 			privateConfig.config.ID: privateConfig,
@@ -232,7 +233,7 @@ func generateTestVector(t *testing.T, kemID hpke.KEMID, kdfID hpke.KDFID, aeadID
 	privateConfig, err := NewConfig(kemID, kdfID, aeadID)
 	require.Nil(t, err, "NewConfig failed")
 
-	client := OHTTPClient{privateConfig.config}
+	client := OHTTPClient{config: privateConfig.config}
 	server := OHTTPServer{
 		keyMap: map[uint8]PrivateConfig{
 			privateConfig.config.ID: privateConfig,
@@ -277,7 +278,7 @@ func verifyTestVector(t *testing.T, vector testVector) {
 	privateConfig, err := NewConfigFromSeed(vector.kemID, vector.kdfID, vector.aeadID, vector.configSeed)
 	require.Nil(t, err, "NewConfigFromSeed failed")
 
-	client := OHTTPClient{privateConfig.config}
+	client := OHTTPClient{config: privateConfig.config}
 	server := OHTTPServer{
 		keyMap: map[uint8]PrivateConfig{
 			privateConfig.config.ID: privateConfig,
@@ -357,4 +358,82 @@ func TestVectorVerify(t *testing.T) {
 	}
 
 	verifyTestVectors(t, encoded)
+}
+
+func TestDraftVector(t *testing.T) {
+	skSEnc := mustUnhex(t, "3c168975674b2fa8e465970b79c8dcf09f1c741626480bd4c6162fc5b6a98e1a")
+	skEEnc := mustUnhex(t, "bc51d5e930bda26589890ac7032f70ad12e4ecb37abb1b65b1256c9c48999c73")
+	configEnc := mustUnhex(t, "01002031e1f05a740102115220e9af918f738674aec95f54db6e04eb705aae8e79815500080001000100010003")
+	request := mustUnhex(t, "00034745540568747470730b6578616d706c652e636f6d012f")
+	response := mustUnhex(t, "0140c8")
+	expectedEncapRequest := mustUnhex(t, "010020000100014b28f881333e7c164ffc499ad9796f877f4e1051ee6d31bad19dec96c208b4726374e469135906992e1268c594d2a10c695d858c40a026e7965e7d86b83dd440b2c0185204b4d63525")
+	expectedEncapResponse := mustUnhex(t, "c789e7151fcba46158ca84b04464910d86f9013e404feea014e7be4a441f234f857fbd")
+	responseNonce := mustUnhex(t, "4b28f881333e7c164ffc499ad9796f877f4e1051ee6d31bad19dec96c208b472c789e7151fcba46158ca84b04464910d")[32:]
+
+	suite, err := hpke.AssembleCipherSuite(hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	skR, err := suite.KEM.DeserializePrivateKey(skSEnc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skE, err := suite.KEM.DeserializePrivateKey(skEEnc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	config, err := UnmarshalPublicConfig(configEnc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateConfig := PrivateConfig{
+		seed:   nil,
+		config: config,
+		sk:     skR,
+		pk:     skR.PublicKey(),
+	}
+
+	client := OHTTPClient{
+		config: config,
+		skE:    skE,
+	}
+	server := OHTTPServer{
+		keyMap: map[uint8]PrivateConfig{
+			config.ID: privateConfig,
+		},
+	}
+
+	encapsulatedRequest, senderContext, err := client.EncapsulateRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(expectedEncapRequest, encapsulatedRequest.Marshal()) {
+		t.Fatal("Encapsulated request mismatch")
+	}
+
+	decapsulatedRequest, receiverContext, err := server.DecapsulateRequest(encapsulatedRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(request, decapsulatedRequest) {
+		t.Fatal("Decapsulated request mismatch")
+	}
+
+	encapsulatedResponse, err := receiverContext.encapsulateResponseWithResponseNonce(response, responseNonce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(expectedEncapResponse, encapsulatedResponse.Marshal()) {
+		t.Fatal("Encapsulated response mismatch")
+	}
+
+	decapsulatedResponse, err := senderContext.DecapsulateResponse(encapsulatedResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(response, decapsulatedResponse) {
+		t.Fatal("Decapsulated response mismatch")
+	}
 }

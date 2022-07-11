@@ -297,6 +297,7 @@ type EncapsulatedResponseContext struct {
 
 type OHTTPClient struct {
 	config PublicConfig
+	skE    hpke.KEMPrivateKey
 }
 
 func (c OHTTPClient) EncapsulateRequest(request []byte) (EncapsulatedRequest, EncapsulatedRequestContext, error) {
@@ -314,20 +315,27 @@ func (c OHTTPClient) EncapsulateRequest(request []byte) (EncapsulatedRequest, En
 		return EncapsulatedRequest{}, EncapsulatedRequestContext{}, err
 	}
 
-	enc, context, err := hpke.SetupBaseS(suite, rand.Reader, pkR, []byte(labelRequest))
+	if c.skE != nil {
+		suite.KEM.SetEphemeralKeyPair(c.skE)
+	}
+
+	info := []byte(labelRequest)
+	info = append(info, 0x00)
+	info = append(info, c.config.ID)
+	buffer := make([]byte, 2)
+	binary.BigEndian.PutUint16(buffer, uint16(kemID))
+	info = append(info, buffer...)
+	binary.BigEndian.PutUint16(buffer, uint16(kdfID))
+	info = append(info, buffer...)
+	binary.BigEndian.PutUint16(buffer, uint16(aeadID))
+	info = append(info, buffer...)
+
+	enc, context, err := hpke.SetupBaseS(suite, rand.Reader, pkR, info)
 	if err != nil {
 		return EncapsulatedRequest{}, EncapsulatedRequestContext{}, err
 	}
 
-	buffer := make([]byte, 2)
-	binary.BigEndian.PutUint16(buffer, uint16(kemID))
-	aad := append([]byte{c.config.ID}, buffer...)
-	binary.BigEndian.PutUint16(buffer, uint16(kdfID))
-	aad = append(aad, buffer...)
-	binary.BigEndian.PutUint16(buffer, uint16(aeadID))
-	aad = append(aad, buffer...)
-
-	ct := context.Seal(aad, request)
+	ct := context.Seal(nil, request)
 
 	return EncapsulatedRequest{
 			keyID:  c.config.ID,
@@ -398,20 +406,23 @@ func (s OHTTPServer) DecapsulateRequest(req EncapsulatedRequest) ([]byte, Decaps
 		return nil, DecapsulateRequestContext{}, err
 	}
 
+	info := []byte(labelRequest)
+	info = append(info, 0x00)
+	info = append(info, req.keyID)
 	buffer := make([]byte, 2)
-	binary.BigEndian.PutUint16(buffer, uint16(config.config.KEMID))
-	aad := append([]byte{req.keyID}, buffer...)
+	binary.BigEndian.PutUint16(buffer, uint16(req.kemID))
+	info = append(info, buffer...)
 	binary.BigEndian.PutUint16(buffer, uint16(req.kdfID))
-	aad = append(aad, buffer...)
+	info = append(info, buffer...)
 	binary.BigEndian.PutUint16(buffer, uint16(req.aeadID))
-	aad = append(aad, buffer...)
+	info = append(info, buffer...)
 
-	context, err := hpke.SetupBaseR(suite, config.sk, req.enc, []byte(labelRequest))
+	context, err := hpke.SetupBaseR(suite, config.sk, req.enc, info)
 	if err != nil {
 		return nil, DecapsulateRequestContext{}, err
 	}
 
-	raw, err := context.Open(aad, req.ct)
+	raw, err := context.Open(nil, req.ct)
 	if err != nil {
 		return nil, DecapsulateRequestContext{}, err
 	}
@@ -430,17 +441,9 @@ func max(a, b int) int {
 	return b
 }
 
-func encapsulateResponse(context *hpke.ReceiverContext, response, enc []byte, suite hpke.CipherSuite) (EncapsulatedResponse, error) {
+func encapsulateResponse(context *hpke.ReceiverContext, response, responseNonce []byte, enc []byte, suite hpke.CipherSuite) (EncapsulatedResponse, error) {
 	// secret = context.Export("message/bhttp response", Nk)
 	secret := context.Export([]byte(labelResponse), suite.AEAD.KeySize())
-
-	// response_nonce = random(max(Nn, Nk))
-	responseNonceLen := max(suite.AEAD.KeySize(), suite.AEAD.NonceSize())
-	responseNonce := make([]byte, responseNonceLen)
-	_, err := rand.Read(responseNonce)
-	if err != nil {
-		return EncapsulatedResponse{}, err
-	}
 
 	// salt = concat(enc, response_nonce)
 	salt := append(append(enc, responseNonce...))
@@ -468,5 +471,17 @@ func encapsulateResponse(context *hpke.ReceiverContext, response, enc []byte, su
 }
 
 func (c DecapsulateRequestContext) EncapsulateResponse(response []byte) (EncapsulatedResponse, error) {
-	return encapsulateResponse(c.context, response, c.enc, c.suite)
+	// response_nonce = random(max(Nn, Nk))
+	responseNonceLen := max(c.suite.AEAD.KeySize(), c.suite.AEAD.NonceSize())
+	responseNonce := make([]byte, responseNonceLen)
+	_, err := rand.Read(responseNonce)
+	if err != nil {
+		return EncapsulatedResponse{}, err
+	}
+
+	return encapsulateResponse(c.context, response, responseNonce, c.enc, c.suite)
+}
+
+func (c DecapsulateRequestContext) encapsulateResponseWithResponseNonce(response []byte, responseNonce []byte) (EncapsulatedResponse, error) {
+	return encapsulateResponse(c.context, response, responseNonce, c.enc, c.suite)
 }

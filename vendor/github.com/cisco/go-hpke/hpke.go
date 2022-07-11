@@ -35,7 +35,7 @@ type KEMScheme interface {
 	SerializePrivateKey(skX KEMPrivateKey) []byte
 	DeserializePrivateKey(skXm []byte) (KEMPrivateKey, error)
 
-	setEphemeralKeyPair(sk KEMPrivateKey)
+	SetEphemeralKeyPair(sk KEMPrivateKey)
 }
 
 type AuthKEMScheme interface {
