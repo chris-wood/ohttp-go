@@ -388,6 +388,13 @@ type Gateway struct {
 	keyMap map[uint8]PrivateConfig
 }
 
+func (g Gateway) Config(keyID uint8) (PublicConfig, error) {
+	if config, ok := g.keyMap[keyID]; ok {
+		return config.Config(), nil
+	}
+	return PublicConfig{}, fmt.Errorf("Unknown keyID %d", keyID)
+}
+
 func NewGateway(keyID uint8, configSeed []byte) (Gateway, error) {
 	privateConfig, err := NewConfigFromSeed(keyID, hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128, configSeed)
 	if err != nil {
