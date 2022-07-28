@@ -151,6 +151,9 @@ func UnmarshalBinaryRequest(data []byte) (*http.Request, error) {
 	authority := controlData.authority
 	if authority == "" {
 		authority = headerMap["Host"]
+		if authority == "" {
+			authority = headerMap["host"]
+		}
 	}
 	url, err := url.Parse(fmt.Sprintf("%s://%s%s", controlData.scheme, controlData.authority, controlData.path))
 	if err != nil {
