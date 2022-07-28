@@ -95,13 +95,13 @@ func (r *BinaryRequest) Marshal() ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-func UnmarshalBinaryRequest(data []byte) (BinaryRequest, error) {
+func UnmarshalBinaryRequest(data []byte) (*http.Request, error) {
 	b := bytes.NewBuffer(data)
 
 	// Framing
 	indicator, err := UnmarshalFrameIndicator(b)
 	if err != nil {
-		return BinaryRequest{}, err
+		return nil, err
 	}
 
 	// Filter based on the type of frame
@@ -109,17 +109,17 @@ func UnmarshalBinaryRequest(data []byte) (BinaryRequest, error) {
 	case knownLengthRequestFrame:
 		break
 	case knownLengthResponseFrame:
-		return BinaryRequest{}, fmt.Errorf("Expected binary HTTP request, not binary HTTP response")
+		return nil, fmt.Errorf("Expected binary HTTP request, not binary HTTP response")
 	case unknownLengthRequestFrame:
 	case unknownLengthResponseFrame:
 	default:
-		return BinaryRequest{}, fmt.Errorf("Unsupported binary HTTP message type")
+		return nil, fmt.Errorf("Unsupported binary HTTP message type")
 	}
 
 	// Control data
 	controlData, err := UnmarshalRequestControlData(b)
 	if err != nil {
-		return BinaryRequest{}, err
+		return nil, err
 	}
 
 	// Sanity check the method
@@ -129,24 +129,24 @@ func UnmarshalBinaryRequest(data []byte) (BinaryRequest, error) {
 	case http.MethodPost:
 		break
 	default:
-		return BinaryRequest{}, fmt.Errorf("Unsupported binary HTTP message request method: %s", controlData.method)
+		return nil, fmt.Errorf("Unsupported binary HTTP message request method: %s", controlData.method)
 	}
 
 	// Reconstruct the URL from Scheme, Authority, and Path
 	url, err := url.Parse(fmt.Sprintf("%s://%s%s", controlData.scheme, controlData.authority, controlData.path))
 	if err != nil {
-		return BinaryRequest{}, err
+		return nil, err
 	}
 
 	// Header fields
 	fields := new(fieldList)
 	encodedFieldData, err := readVarintSlice(b)
 	if err != nil {
-		return BinaryRequest{}, err
+		return nil, err
 	}
 	err = fields.Unmarshal(bytes.NewBuffer(encodedFieldData))
 	if err != nil {
-		return BinaryRequest{}, err
+		return nil, err
 	}
 	headerMap := make(map[string][]string)
 	for _, field := range fields.fields {
@@ -156,7 +156,7 @@ func UnmarshalBinaryRequest(data []byte) (BinaryRequest, error) {
 	// Content
 	content, err := readVarintSlice(b)
 	if err != nil {
-		return BinaryRequest{}, err
+		return nil, err
 	}
 
 	// Trailer
@@ -165,13 +165,13 @@ func UnmarshalBinaryRequest(data []byte) (BinaryRequest, error) {
 	// Construct the raw request
 	request, err := http.NewRequest(controlData.method, url.String(), bytes.NewBuffer(content))
 	if err != nil {
-		return BinaryRequest{}, err
+		return nil, err
 	}
 	for _, field := range fields.fields {
 		request.Header.Set(field.name, field.value)
 	}
 
-	return BinaryRequest(*request), nil
+	return request, nil
 }
 
 // Request Control Data {
