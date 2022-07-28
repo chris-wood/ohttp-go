@@ -70,7 +70,7 @@ func (c PrivateConfig) PrivateKey() hpke.KEMPrivateKey {
 	return c.sk
 }
 
-func NewConfigFromSeed(kemID hpke.KEMID, kdfID hpke.KDFID, aeadID hpke.AEADID, seed []byte) (PrivateConfig, error) {
+func NewConfigFromSeed(keyID uint8, kemID hpke.KEMID, kdfID hpke.KDFID, aeadID hpke.AEADID, seed []byte) (PrivateConfig, error) {
 	suite, err := hpke.AssembleCipherSuite(kemID, kdfID, aeadID)
 	if err != nil {
 		return PrivateConfig{}, err
@@ -86,9 +86,8 @@ func NewConfigFromSeed(kemID hpke.KEMID, kdfID hpke.KDFID, aeadID hpke.AEADID, s
 		AEADID: aeadID,
 	}
 
-	// TODO(caw): figure out a better API for creating keys with fixed IDs
 	publicConfig := PublicConfig{
-		ID:             uint8(0x00),
+		ID:             keyID,
 		KEMID:          kemID,
 		Suites:         []ConfigCipherSuite{cs},
 		PublicKeyBytes: suite.KEM.SerializePublicKey(pk),
@@ -102,7 +101,7 @@ func NewConfigFromSeed(kemID hpke.KEMID, kdfID hpke.KDFID, aeadID hpke.AEADID, s
 	}, nil
 }
 
-func NewConfig(kemID hpke.KEMID, kdfID hpke.KDFID, aeadID hpke.AEADID) (PrivateConfig, error) {
+func NewConfig(keyID uint8, kemID hpke.KEMID, kdfID hpke.KDFID, aeadID hpke.AEADID) (PrivateConfig, error) {
 	suite, err := hpke.AssembleCipherSuite(kemID, kdfID, aeadID)
 	if err != nil {
 		return PrivateConfig{}, err
@@ -111,7 +110,7 @@ func NewConfig(kemID hpke.KEMID, kdfID hpke.KDFID, aeadID hpke.AEADID) (PrivateC
 	ikm := make([]byte, suite.KEM.PrivateKeySize())
 	rand.Reader.Read(ikm)
 
-	return NewConfigFromSeed(kemID, kdfID, aeadID, ikm)
+	return NewConfigFromSeed(keyID, kemID, kdfID, aeadID, ikm)
 }
 
 func (c PublicConfig) Marshal() []byte {
@@ -295,12 +294,12 @@ func UnmarshalEncapsulatedResponse(enc []byte) (EncapsulatedResponse, error) {
 type EncapsulatedResponseContext struct {
 }
 
-type OHTTPClient struct {
+type Client struct {
 	config PublicConfig
 	skE    hpke.KEMPrivateKey
 }
 
-func (c OHTTPClient) EncapsulateRequest(request []byte) (EncapsulatedRequest, EncapsulatedRequestContext, error) {
+func (c Client) EncapsulateRequest(request []byte) (EncapsulatedRequest, EncapsulatedRequestContext, error) {
 	kemID := c.config.KEMID
 	kdfID := c.config.Suites[0].KDFID
 	aeadID := c.config.Suites[0].AEADID
@@ -384,9 +383,22 @@ func (c EncapsulatedRequestContext) DecapsulateResponse(response EncapsulatedRes
 	return cipher.Open(nil, nonce, response.raw[c.suite.AEAD.KeySize():], nil)
 }
 
-type OHTTPServer struct {
+type Gateway struct {
 	// map from IDs to private key(s)
 	keyMap map[uint8]PrivateConfig
+}
+
+func NewGateway(keyID uint8, configSeed []byte) (Gateway, error) {
+	privateConfig, err := NewConfigFromSeed(keyID, hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128, configSeed)
+	if err != nil {
+		return Gateway{}, err
+	}
+
+	return Gateway{
+		keyMap: map[uint8]PrivateConfig{
+			privateConfig.config.ID: privateConfig,
+		},
+	}, nil
 }
 
 type DecapsulateRequestContext struct {
@@ -395,7 +407,7 @@ type DecapsulateRequestContext struct {
 	context *hpke.ReceiverContext
 }
 
-func (s OHTTPServer) DecapsulateRequest(req EncapsulatedRequest) ([]byte, DecapsulateRequestContext, error) {
+func (s Gateway) DecapsulateRequest(req EncapsulatedRequest) ([]byte, DecapsulateRequestContext, error) {
 	config, ok := s.keyMap[req.keyID]
 	if !ok {
 		return nil, DecapsulateRequestContext{}, fmt.Errorf("Unknown key ID")

@@ -19,7 +19,7 @@ const (
 )
 
 func TestConfigSerialize(t *testing.T) {
-	privateConfig, err := NewConfig(hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128)
+	privateConfig, err := NewConfig(0x00, hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128)
 	require.Nil(t, err, "CreatePrivateConfig failed")
 
 	config := privateConfig.config
@@ -31,11 +31,11 @@ func TestConfigSerialize(t *testing.T) {
 }
 
 func TestRoundTrip(t *testing.T) {
-	privateConfig, err := NewConfig(hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128)
+	privateConfig, err := NewConfig(0x00, hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128)
 	require.Nil(t, err, "CreatePrivateConfig failed")
 
-	client := OHTTPClient{config: privateConfig.config}
-	server := OHTTPServer{
+	client := Client{config: privateConfig.config}
+	server := Gateway{
 		keyMap: map[uint8]PrivateConfig{
 			privateConfig.config.ID: privateConfig,
 		},
@@ -230,11 +230,11 @@ func (tva *testVectorArray) UnmarshalJSON(data []byte) error {
 }
 
 func generateTestVector(t *testing.T, kemID hpke.KEMID, kdfID hpke.KDFID, aeadID hpke.AEADID) testVector {
-	privateConfig, err := NewConfig(kemID, kdfID, aeadID)
+	privateConfig, err := NewConfig(0x00, kemID, kdfID, aeadID)
 	require.Nil(t, err, "NewConfig failed")
 
-	client := OHTTPClient{config: privateConfig.config}
-	server := OHTTPServer{
+	client := Client{config: privateConfig.config}
+	server := Gateway{
 		keyMap: map[uint8]PrivateConfig{
 			privateConfig.config.ID: privateConfig,
 		},
@@ -275,11 +275,11 @@ func generateTestVector(t *testing.T, kemID hpke.KEMID, kdfID hpke.KDFID, aeadID
 }
 
 func verifyTestVector(t *testing.T, vector testVector) {
-	privateConfig, err := NewConfigFromSeed(vector.kemID, vector.kdfID, vector.aeadID, vector.configSeed)
+	privateConfig, err := NewConfigFromSeed(0x00, vector.kemID, vector.kdfID, vector.aeadID, vector.configSeed)
 	require.Nil(t, err, "NewConfigFromSeed failed")
 
-	client := OHTTPClient{config: privateConfig.config}
-	server := OHTTPServer{
+	client := Client{config: privateConfig.config}
+	server := Gateway{
 		keyMap: map[uint8]PrivateConfig{
 			privateConfig.config.ID: privateConfig,
 		},
@@ -395,11 +395,11 @@ func TestDraftVector(t *testing.T) {
 		pk:     skR.PublicKey(),
 	}
 
-	client := OHTTPClient{
+	client := Client{
 		config: config,
 		skE:    skE,
 	}
-	server := OHTTPServer{
+	server := Gateway{
 		keyMap: map[uint8]PrivateConfig{
 			config.ID: privateConfig,
 		},
