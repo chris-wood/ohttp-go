@@ -43,6 +43,17 @@ func TestSimpleRequest(t *testing.T) {
 	}
 }
 
+func TestSimpleResponse(t *testing.T) {
+	testResponse := &http.Response{
+		Body: ioutil.NopCloser(bytes.NewBufferString("test")),
+	}
+	binaryResponse := CreateBinaryResponse(testResponse)
+	_, err := binaryResponse.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFieldMarshal(t *testing.T) {
 	tests := []struct {
 		f   field

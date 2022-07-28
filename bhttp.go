@@ -423,3 +423,7 @@ func (r *BinaryResponse) Marshal() ([]byte, error) {
 
 	return b.Bytes(), nil
 }
+
+func CreateBinaryResponse(resp *http.Response) BinaryResponse {
+	return BinaryResponse(*resp)
+}
