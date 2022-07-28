@@ -94,7 +94,7 @@ func (r *BinaryRequest) Marshal() ([]byte, error) {
 	}
 
 	// Trailer fields
-	// TODO(caw): add support for trailing fields
+	// XXX(caw): add support for trailing fields
 	Write(b, uint64(0))
 
 	return b.Bytes(), nil

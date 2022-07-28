@@ -314,9 +314,9 @@ func (c Client) EncapsulateRequest(request []byte) (EncapsulatedRequest, Encapsu
 		return EncapsulatedRequest{}, EncapsulatedRequestContext{}, err
 	}
 
-	if c.skE != nil {
-		suite.KEM.SetEphemeralKeyPair(c.skE)
-	}
+	// if c.skE != nil {
+	// 	suite.KEM.SetEphemeralKeyPair(c.skE)
+	// }
 
 	info := []byte(labelRequest)
 	info = append(info, 0x00)
