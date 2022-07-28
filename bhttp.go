@@ -132,12 +132,6 @@ func UnmarshalBinaryRequest(data []byte) (*http.Request, error) {
 		return nil, fmt.Errorf("Unsupported binary HTTP message request method: %s", controlData.method)
 	}
 
-	// Reconstruct the URL from Scheme, Authority, and Path
-	url, err := url.Parse(fmt.Sprintf("%s://%s%s", controlData.scheme, controlData.authority, controlData.path))
-	if err != nil {
-		return nil, err
-	}
-
 	// Header fields
 	fields := new(fieldList)
 	encodedFieldData, err := readVarintSlice(b)
@@ -148,9 +142,19 @@ func UnmarshalBinaryRequest(data []byte) (*http.Request, error) {
 	if err != nil {
 		return nil, err
 	}
-	headerMap := make(map[string][]string)
+	headerMap := make(map[string]string)
 	for _, field := range fields.fields {
-		headerMap[field.name] = []string{field.value}
+		headerMap[field.name] = field.value
+	}
+
+	// Reconstruct the URL from Scheme, Authority, and Path
+	authority := controlData.authority
+	if authority == "" {
+		authority = headerMap["Host"]
+	}
+	url, err := url.Parse(fmt.Sprintf("%s://%s%s", controlData.scheme, controlData.authority, controlData.path))
+	if err != nil {
+		return nil, err
 	}
 
 	// Content

@@ -20,6 +20,8 @@ func TestSimpleRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	request.Header.Set("Content-Type", "application/json; charset=UTF-8")
+	request.Header.Set("Host", "example.com")
+	request.Header.Set("Foo", "Bar")
 
 	binaryRequest := BinaryRequest(*request)
 	encodedRequest, err := binaryRequest.Marshal()
@@ -39,6 +41,15 @@ func TestSimpleRequest(t *testing.T) {
 		t.Fatal("Mismatch URL")
 	}
 	if binaryRequest.URL.String() != testURL {
+		t.Fatal("Incorrect URL")
+	}
+	if recoveredRequest.Header.Get("Foo") == "Bar" {
+		t.Fatal("Incorrect URL")
+	}
+	if recoveredRequest.Header.Get("Host") == "example.com" {
+		t.Fatal("Incorrect URL")
+	}
+	if recoveredRequest.Header.Get("Content-Type") == "application/json; charset=UTF-8" {
 		t.Fatal("Incorrect URL")
 	}
 }
