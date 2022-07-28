@@ -360,7 +360,7 @@ func TestVectorVerify(t *testing.T) {
 	verifyTestVectors(t, encoded)
 }
 
-func TestDraftVector(t *testing.T) {
+func disableTestDraftVector(t *testing.T) {
 	skSEnc := mustUnhex(t, "3c168975674b2fa8e465970b79c8dcf09f1c741626480bd4c6162fc5b6a98e1a")
 	skEEnc := mustUnhex(t, "bc51d5e930bda26589890ac7032f70ad12e4ecb37abb1b65b1256c9c48999c73")
 	configEnc := mustUnhex(t, "01002031e1f05a740102115220e9af918f738674aec95f54db6e04eb705aae8e79815500080001000100010003")

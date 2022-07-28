@@ -9,6 +9,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSimpleRequest(t *testing.T) {
+	testURL := "https://example.com:443/path"
+
+	var jsonContent = []byte(`{
+		"value": "value",
+	}`)
+	request, err := http.NewRequest(http.MethodPost, testURL, bytes.NewBuffer(jsonContent))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json; charset=UTF-8")
+
+	binaryRequest := BinaryRequest(*request)
+	encodedRequest, err := binaryRequest.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recoveredRequest, err := UnmarshalBinaryRequest(encodedRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if binaryRequest.Method != recoveredRequest.Method {
+		t.Fatal("Mismatch method")
+	}
+	if binaryRequest.URL.String() != recoveredRequest.URL.String() {
+		t.Fatal("Mismatch URL")
+	}
+	if binaryRequest.URL.String() != testURL {
+		t.Fatal("Incorrect URL")
+	}
+}
+
 func TestFieldMarshal(t *testing.T) {
 	tests := []struct {
 		f   field

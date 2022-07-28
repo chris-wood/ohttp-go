@@ -2,8 +2,11 @@ package ohttp
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -25,6 +28,14 @@ func (f frameIndicator) Marshal() []byte {
 	return b.Bytes()
 }
 
+func UnmarshalFrameIndicator(b io.ByteReader) (frameIndicator, error) {
+	val, err := Read(b)
+	if err != nil {
+		return 0, err
+	}
+	return frameIndicator(val), nil
+}
+
 func encodeVarintSlice(b *bytes.Buffer, data []byte) {
 	Write(b, uint64(len(data)))
 	b.Write([]byte(data))
@@ -44,30 +55,14 @@ func readVarintSlice(b *bytes.Buffer) ([]byte, error) {
 	return value, nil
 }
 
-// Known-length message encoding
-//
-// Message with Known-Length {
-// 	Framing (i) = 0..1,
-// 	Known-Length Informational Response (..) ...,
-// 	Control Data (..),
+// Request with Known-Length {
+// 	Framing Indicator (i) = 0,
+// 	Request Control Data (..),
 // 	Known-Length Field Section (..),
 // 	Known-Length Content (..),
 // 	Known-Length Field Section (..),
+// 	Padding (..),
 // }
-//   Known-Length Field Section {
-// 	Length (i) = 2..,
-// 	Field Line (..) ...,
-//   }
-//
-//   Known-Length Content {
-// 	Content Length (i),
-// 	Content (..)
-//   }
-//
-//   Known-Length Informational Response {
-// 	Informational Response Control Data (..),
-// 	Known-Length Field Section (..),
-//   }
 func (r *BinaryRequest) Marshal() ([]byte, error) {
 	b := new(bytes.Buffer)
 
@@ -75,7 +70,7 @@ func (r *BinaryRequest) Marshal() ([]byte, error) {
 	b.Write(knownLengthRequestFrame.Marshal())
 
 	// Control data
-	controlData := createControlData(r)
+	controlData := createRequestControlData(r)
 	b.Write(controlData.Marshal())
 
 	// Header fields
@@ -94,10 +89,89 @@ func (r *BinaryRequest) Marshal() ([]byte, error) {
 	}
 
 	// Trailer fields
-	// XXX(caw): add support for trailing fields
+	// Note: trailer fields are currently not supported
 	Write(b, uint64(0))
 
 	return b.Bytes(), nil
+}
+
+func UnmarshalBinaryRequest(data []byte) (BinaryRequest, error) {
+	b := bytes.NewBuffer(data)
+
+	// Framing
+	indicator, err := UnmarshalFrameIndicator(b)
+	if err != nil {
+		return BinaryRequest{}, err
+	}
+
+	// Filter based on the type of frame
+	switch indicator {
+	case knownLengthRequestFrame:
+		break
+	case knownLengthResponseFrame:
+		return BinaryRequest{}, fmt.Errorf("Expected binary HTTP request, not binary HTTP response")
+	case unknownLengthRequestFrame:
+	case unknownLengthResponseFrame:
+	default:
+		return BinaryRequest{}, fmt.Errorf("Unsupported binary HTTP message type")
+	}
+
+	// Control data
+	controlData, err := UnmarshalRequestControlData(b)
+	if err != nil {
+		return BinaryRequest{}, err
+	}
+
+	// Sanity check the method
+	switch controlData.method {
+	case http.MethodGet:
+		break
+	case http.MethodPost:
+		break
+	default:
+		return BinaryRequest{}, fmt.Errorf("Unsupported binary HTTP message request method: %s", controlData.method)
+	}
+
+	// Reconstruct the URL from Scheme, Authority, and Path
+	url, err := url.Parse(fmt.Sprintf("%s://%s%s", controlData.scheme, controlData.authority, controlData.path))
+	if err != nil {
+		return BinaryRequest{}, err
+	}
+
+	// Header fields
+	fields := new(fieldList)
+	encodedFieldData, err := readVarintSlice(b)
+	if err != nil {
+		return BinaryRequest{}, err
+	}
+	err = fields.Unmarshal(bytes.NewBuffer(encodedFieldData))
+	if err != nil {
+		return BinaryRequest{}, err
+	}
+	headerMap := make(map[string][]string)
+	for _, field := range fields.fields {
+		headerMap[field.name] = []string{field.value}
+	}
+
+	// Content
+	content, err := readVarintSlice(b)
+	if err != nil {
+		return BinaryRequest{}, err
+	}
+
+	// Trailer
+	// XXX(caw): this is currently unsupported
+
+	// Construct the raw request
+	request, err := http.NewRequest(controlData.method, url.String(), bytes.NewBuffer(content))
+	if err != nil {
+		return BinaryRequest{}, err
+	}
+	for _, field := range fields.fields {
+		request.Header.Set(field.name, field.value)
+	}
+
+	return BinaryRequest(*request), nil
 }
 
 // Request Control Data {
@@ -117,7 +191,7 @@ type requestControlData struct {
 	path      string
 }
 
-func createControlData(r *BinaryRequest) requestControlData {
+func createRequestControlData(r *BinaryRequest) requestControlData {
 	return requestControlData{
 		method:    r.Method,
 		scheme:    r.URL.Scheme,
@@ -135,6 +209,64 @@ func (d requestControlData) Marshal() []byte {
 	encodeVarintSlice(b, []byte(d.path))
 
 	return b.Bytes()
+}
+
+func UnmarshalRequestControlData(b *bytes.Buffer) (requestControlData, error) {
+	method, err := readVarintSlice(b)
+	if err != nil {
+		return requestControlData{}, err
+	}
+
+	scheme, err := readVarintSlice(b)
+	if err != nil {
+		return requestControlData{}, err
+	}
+
+	authority, err := readVarintSlice(b)
+	if err != nil {
+		return requestControlData{}, err
+	}
+
+	path, err := readVarintSlice(b)
+	if err != nil {
+		return requestControlData{}, err
+	}
+
+	return requestControlData{
+		method:    string(method),
+		scheme:    string(scheme),
+		authority: string(authority),
+		path:      string(path),
+	}, nil
+}
+
+// Final Response Control Data {
+// 	Status Code (i) = 200..599,
+//   }
+type responseControlData struct {
+	statusCode int
+}
+
+func createResponseControlData(r *BinaryResponse) responseControlData {
+	return responseControlData{
+		statusCode: r.StatusCode,
+	}
+}
+
+func (d responseControlData) Marshal() []byte {
+	b := new(bytes.Buffer)
+	Write(b, uint64(d.statusCode))
+	return b.Bytes()
+}
+
+func UnmarshalResponseControlData(b *bytes.Buffer) (responseControlData, error) {
+	statusCode, err := Read(b)
+	if err != nil {
+		return responseControlData{}, err
+	}
+	return responseControlData{
+		statusCode: int(statusCode),
+	}, nil
 }
 
 type field struct {
@@ -255,6 +387,15 @@ func (d infoResponseControlData) Marshal() []byte {
 	return b.Bytes()
 }
 
+// Response with Known-Length {
+// 	Framing Indicator (i) = 1,
+// 	Known-Length Informational Response (..) ...,
+// 	Final Response Control Data (..),
+// 	Known-Length Field Section (..),
+// 	Known-Length Content (..),
+// 	Known-Length Field Section (..),
+// 	Padding (..),
+//   }
 func (r *BinaryResponse) Marshal() ([]byte, error) {
 	b := new(bytes.Buffer)
 
@@ -282,24 +423,3 @@ func (r *BinaryResponse) Marshal() ([]byte, error) {
 
 	return b.Bytes(), nil
 }
-
-// ///////
-// // BinaryResponseWriter interface
-
-// type BinaryResponseWriter struct {
-// 	statusCode int
-// 	header     http.Header
-// 	buffer     bytes.Buffer
-// }
-
-// func (w BinaryResponseWriter) Header() http.Header {
-// 	return w.header
-// }
-
-// func (w BinaryResponseWriter) Write(b []byte) (int, error) {
-// 	return w.buffer.Write(b)
-// }
-
-// func (w BinaryResponseWriter) WriteHeader(statusCode int) {
-// 	w.statusCode = statusCode
-// }
