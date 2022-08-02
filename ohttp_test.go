@@ -34,12 +34,8 @@ func TestRoundTrip(t *testing.T) {
 	privateConfig, err := NewConfig(0x00, hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128)
 	require.Nil(t, err, "CreatePrivateConfig failed")
 
-	client := Client{config: privateConfig.config}
-	server := Gateway{
-		keyMap: map[uint8]PrivateConfig{
-			privateConfig.config.ID: privateConfig,
-		},
-	}
+	client := NewDefaultClient(privateConfig.config)
+	server := NewDefaultGateway(privateConfig)
 
 	rawRequest := []byte("why is the sky blue?")
 	rawResponse := []byte("because air is blue")
@@ -57,6 +53,54 @@ func TestRoundTrip(t *testing.T) {
 	receivedResp, err := reqContext.DecapsulateResponse(resp)
 	require.Nil(t, err, "EncapsulateResponse failed")
 	require.Equal(t, rawResponse, receivedResp, "Response mismatch")
+}
+
+func TestCustomRoundTrip(t *testing.T) {
+	privateConfig, err := NewConfig(0x00, hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128)
+	require.Nil(t, err, "CreatePrivateConfig failed")
+
+	customRequestLabel := "message/dns req"
+	customResponseLabel := "message/dns rep"
+
+	client := NewCustomClient(privateConfig.config, customRequestLabel, customResponseLabel)
+	server := NewCustomGateway(privateConfig, customRequestLabel, customResponseLabel)
+
+	rawRequest := []byte("why is the sky blue?")
+	rawResponse := []byte("because air is blue")
+
+	req, reqContext, err := client.EncapsulateRequest(rawRequest)
+	require.Nil(t, err, "EncapsulateRequest failed")
+
+	receivedReq, respContext, err := server.DecapsulateRequest(req)
+	require.Nil(t, err, "DecapsulateRequest failed")
+	require.Equal(t, rawRequest, receivedReq, "Request mismatch")
+
+	resp, err := respContext.EncapsulateResponse(rawResponse)
+	require.Nil(t, err, "EncapsulateResponse failed")
+
+	receivedResp, err := reqContext.DecapsulateResponse(resp)
+	require.Nil(t, err, "EncapsulateResponse failed")
+	require.Equal(t, rawResponse, receivedResp, "Response mismatch")
+}
+
+func TestEncodingMismatchFailure(t *testing.T) {
+	privateConfig, err := NewConfig(0x00, hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128)
+	require.Nil(t, err, "CreatePrivateConfig failed")
+
+	customRequestLabel := "message/dns req"
+	customResponseLabel := "message/dns rep"
+
+	client := NewDefaultClient(privateConfig.config)
+	server := NewCustomGateway(privateConfig, customRequestLabel, customResponseLabel)
+
+	rawRequest := []byte("why is the sky blue?")
+
+	req, _, err := client.EncapsulateRequest(rawRequest)
+	require.Nil(t, err, "EncapsulateRequest failed")
+
+	receivedReq, _, err := server.DecapsulateRequest(req)
+	require.NotNil(t, err, "DecapsulateRequest succeeded when it should have failed")
+	require.Nil(t, receivedReq, "Request not nil")
 }
 
 ///////
@@ -233,12 +277,8 @@ func generateTestVector(t *testing.T, kemID hpke.KEMID, kdfID hpke.KDFID, aeadID
 	privateConfig, err := NewConfig(0x00, kemID, kdfID, aeadID)
 	require.Nil(t, err, "NewConfig failed")
 
-	client := Client{config: privateConfig.config}
-	server := Gateway{
-		keyMap: map[uint8]PrivateConfig{
-			privateConfig.config.ID: privateConfig,
-		},
-	}
+	client := NewDefaultClient(privateConfig.config)
+	server := NewDefaultGateway(privateConfig)
 
 	rawRequest := []byte("why is the sky blue?")
 	rawResponse := []byte("because air is blue")
@@ -278,12 +318,8 @@ func verifyTestVector(t *testing.T, vector testVector) {
 	privateConfig, err := NewConfigFromSeed(0x00, vector.kemID, vector.kdfID, vector.aeadID, vector.configSeed)
 	require.Nil(t, err, "NewConfigFromSeed failed")
 
-	client := Client{config: privateConfig.config}
-	server := Gateway{
-		keyMap: map[uint8]PrivateConfig{
-			privateConfig.config.ID: privateConfig,
-		},
-	}
+	client := NewDefaultClient(privateConfig.config)
+	server := NewDefaultGateway(privateConfig)
 
 	for _, transaction := range vector.transactions {
 		req, reqContext, err := client.EncapsulateRequest(transaction.request)
