@@ -428,6 +428,9 @@ func NewDefaultGateway(config PrivateConfig) Gateway {
 }
 
 func NewCustomGateway(config PrivateConfig, requestLabel, responseLabel string) Gateway {
+	if requestLabel == "" || responseLabel == "" || requestLabel == responseLabel {
+		panic("Invalid request and response labels")
+	}
 	return Gateway{
 		requestLabel:  []byte(requestLabel),
 		responseLabel: []byte(responseLabel),
