@@ -473,3 +473,41 @@ func disableTestDraftVector(t *testing.T) {
 		t.Fatal("Decapsulated response mismatch")
 	}
 }
+
+func BenchmarkRoundTrip(b *testing.B) {
+	privateConfig, err := NewConfig(0x00, hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128)
+	require.Nil(b, err, "CreatePrivateConfig failed")
+
+	client := NewDefaultClient(privateConfig.config)
+	server := NewDefaultGateway(privateConfig)
+
+	rawRequest := []byte("why is the sky blue?")
+	rawResponse := []byte("because air is blue")
+
+	var receivedReq []byte
+	var req EncapsulatedRequest
+	var reqContext EncapsulatedRequestContext
+	var resp EncapsulatedResponse
+	var respContext DecapsulateRequestContext
+	b.Run("Encapsulate request", func(b *testing.B) {
+		req, reqContext, err = client.EncapsulateRequest(rawRequest)
+		require.Nil(b, err, "EncapsulateRequest failed")
+	})
+
+	b.Run("Decapsulate request", func(b *testing.B) {
+		receivedReq, respContext, err = server.DecapsulateRequest(req)
+		require.Nil(b, err, "DecapsulateRequest failed")
+		require.Equal(b, rawRequest, receivedReq, "Request mismatch")
+	})
+
+	b.Run("Encapsulate response", func(b *testing.B) {
+		resp, err = respContext.EncapsulateResponse(rawResponse)
+		require.Nil(b, err, "EncapsulateResponse failed")
+	})
+
+	b.Run("Decapsulate response", func(b *testing.B) {
+		receivedResp, err := reqContext.DecapsulateResponse(resp)
+		require.Nil(b, err, "DecapsulateResponse failed")
+		require.Equal(b, rawResponse, receivedResp, "Response mismatch")
+	})
+}
