@@ -190,14 +190,4 @@ func TestResponseMarshal(t *testing.T) {
 	}
 
 	require.Equal(t, resp.StatusCode, http.StatusOK, "Incorrect status code")
-
-	// r := BinaryResponse(resp)
-	// enc, err := r.Marshal()
-	// require.Nil(t, err, "BinaryResponse Marshal failed")
-	// fmt.Printf("%s", hex.Dump(enc))
-	// fmt.Println(hex.EncodeToString(enc))
-
-	// respEnc, err := httputil.DumpResponse(&resp, true)
-	// require.Nil(t, err, "Dump response failed")
-	// fmt.Println(string(respEnc))
 }
