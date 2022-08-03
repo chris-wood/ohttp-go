@@ -59,8 +59,8 @@ func TestCustomRoundTrip(t *testing.T) {
 	privateConfig, err := NewConfig(0x00, hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128)
 	require.Nil(t, err, "CreatePrivateConfig failed")
 
-	customRequestLabel := "message/dns req"
-	customResponseLabel := "message/dns rep"
+	customRequestLabel := "message/app-specific-type req"
+	customResponseLabel := "message/app-specific-type rep"
 
 	client := NewCustomClient(privateConfig.config, customRequestLabel, customResponseLabel)
 	server := NewCustomGateway(privateConfig, customRequestLabel, customResponseLabel)
