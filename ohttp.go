@@ -447,6 +447,11 @@ type DecapsulateRequestContext struct {
 	context       *hpke.ReceiverContext
 }
 
+func (s Gateway) MatchesKnownKey(req EncapsulatedRequest) bool {
+	_, ok := s.keyMap[req.keyID]
+	return ok
+}
+
 func (s Gateway) DecapsulateRequest(req EncapsulatedRequest) ([]byte, DecapsulateRequestContext, error) {
 	config, ok := s.keyMap[req.keyID]
 	if !ok {
