@@ -431,6 +431,67 @@ func (r *BinaryResponse) Marshal() ([]byte, error) {
 	return b.Bytes(), nil
 }
 
+func UnmarshalBinaryResponse(data []byte) (*http.Response, error) {
+	b := bytes.NewBuffer(data)
+
+	// Framing
+	indicator, err := UnmarshalFrameIndicator(b)
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter based on the type of frame
+	switch indicator {
+	case knownLengthRequestFrame:
+		return nil, fmt.Errorf("Expected binary HTTP response, not binary HTTP request")
+	case knownLengthResponseFrame:
+		break
+	case unknownLengthRequestFrame:
+	case unknownLengthResponseFrame:
+	default:
+		return nil, fmt.Errorf("Unsupported binary HTTP message type")
+	}
+
+	// Control data
+	finalStatusCode, err := Read(b)
+	if err != nil {
+		return nil, err
+	}
+
+	// Header fields
+	fields := new(fieldList)
+	encodedFieldData, err := readVarintSlice(b)
+	if err != nil {
+		return nil, err
+	}
+	err = fields.Unmarshal(bytes.NewBuffer(encodedFieldData))
+	if err != nil {
+		return nil, err
+	}
+	headerMap := make(map[string][]string)
+	for _, field := range fields.fields {
+		headerMap[field.name] = []string{field.value}
+	}
+
+	// Content
+	content, err := readVarintSlice(b)
+	if err != nil {
+		return nil, err
+	}
+
+	// Trailer
+	// XXX(caw): this is currently unsupported
+
+	// Construct the raw request
+	resp := &http.Response{
+		StatusCode: int(finalStatusCode),
+		Header:     headerMap,
+		Body:       ioutil.NopCloser(bytes.NewReader(content)),
+	}
+
+	return resp, nil
+}
+
 func CreateBinaryResponse(resp *http.Response) BinaryResponse {
 	return BinaryResponse(*resp)
 }
