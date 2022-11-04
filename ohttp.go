@@ -417,6 +417,18 @@ func (g Gateway) Config(keyID uint8) (PublicConfig, error) {
 	return PublicConfig{}, fmt.Errorf("Unknown keyID %d", keyID)
 }
 
+func (g Gateway) Client(keyID uint8) (Client, error) {
+	config, err := g.Config(keyID)
+	if err != nil {
+		return Client{}, err
+	}
+	return Client{
+		requestLabel:  g.requestLabel,
+		responseLabel: g.responseLabel,
+		config:        config,
+	}, nil
+}
+
 func NewDefaultGateway(config PrivateConfig) Gateway {
 	return Gateway{
 		requestLabel:  []byte(defaultLabelRequest),

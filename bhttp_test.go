@@ -332,19 +332,92 @@ func TestRequestMarshal(t *testing.T) {
 		} else {
 			require.Equal(t, test.expectedError, err, "Expected error mismatch")
 		}
-
 	}
 }
 
+func createResponseFromParts(statusCode int, headers map[string]string, trailers map[string]string, content []byte) *http.Response {
+	resp := &http.Response{
+		Body:       ioutil.NopCloser(bytes.NewBuffer(content)),
+		StatusCode: statusCode,
+		Header:     http.Header{},
+		Trailer:    http.Header{},
+	}
+
+	for key, value := range headers {
+		resp.Header.Set(key, value)
+	}
+	for key, value := range trailers {
+		resp.Trailer.Set(key, value)
+	}
+
+	return resp
+}
+
 func TestResponseMarshal(t *testing.T) {
-	resp := http.Response{
-		Body:       ioutil.NopCloser(bytes.NewBufferString("Hello World!")),
-		StatusCode: http.StatusOK,
-		Header: http.Header{
-			"Content-Type": []string{"text/plain"},
-			"Test-Header":  []string{"foobarbaz"},
+	testHeaderMap := make(map[string]string)
+	testHeaderMap["TestHeader"] = "foo" // len("TestHeader") == 10, len("foo") == 3
+	testTrailerMap := make(map[string]string)
+	testTrailerMap["TestTrailer"] = "bar" // len("TestTrailer") == 11, len("bar") == 3
+
+	tests := []struct {
+		response      *http.Response
+		enc           []byte
+		expectedError error
+	}{
+		{
+			response: createResponseFromParts(http.StatusOK, nil, nil, []byte("body")),
+			enc: []byte{
+				// Framing indicator
+				byte(knownLengthResponseFrame),
+				// Final Response Control Data
+				0x40, http.StatusOK,
+				// Known-Length Field Section (Headers)
+				0, // empty list of fields
+				// Known-Length Content
+				4, 'b', 'o', 'd', 'y',
+				// Known-Length Field Section (Trailers)
+				0, // empty list of fields
+				// Padding
+				// empty
+			},
+			expectedError: nil,
+		},
+		{
+			response: createResponseFromParts(http.StatusOK, testHeaderMap, testTrailerMap, []byte("body")),
+			enc: []byte{
+				// Framing indicator
+				byte(knownLengthResponseFrame),
+				// Final Response Control Data
+				0x40, http.StatusOK,
+				// Known-Length Field Section (Headers)
+				15,
+				10, 't', 'e', 's', 't', 'h', 'e', 'a', 'd', 'e', 'r',
+				3, 'f', 'o', 'o',
+				// Known-Length Content
+				4, 'b', 'o', 'd', 'y',
+				// Known-Length Field Section (Trailers)
+				16,
+				11, 't', 'e', 's', 't', 't', 'r', 'a', 'i', 'l', 'e', 'r',
+				3, 'b', 'a', 'r',
+				// Padding
+				// empty
+			},
+			expectedError: nil,
+		},
+		{
+			response:      createResponseFromParts(100, nil, nil, []byte("body")),
+			enc:           nil,
+			expectedError: errInformationalNotSupported,
 		},
 	}
 
-	require.Equal(t, resp.StatusCode, http.StatusOK, "Incorrect status code")
+	for _, test := range tests {
+		binaryResponse := BinaryResponse(*test.response)
+		encodedResponse, err := binaryResponse.Marshal()
+		if test.expectedError == nil {
+			require.Equal(t, test.enc, encodedResponse, "Encoded response mismatch")
+		} else {
+			require.Equal(t, test.expectedError, err, "Expected error mismatch")
+		}
+	}
 }
