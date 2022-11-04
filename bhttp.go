@@ -25,7 +25,8 @@ const (
 )
 
 var (
-	errProhibitedField = errors.New("Prohibited field detected")
+	errProhibitedField           = errors.New("Prohibited field detected")
+	errInformationalNotSupported = errors.New("Informational messages not supported")
 )
 
 func isProhibitedField(fieldName string) bool {
@@ -470,7 +471,7 @@ func (r *BinaryResponse) Marshal() ([]byte, error) {
 
 	// TODO(caw): if the response is informational (100..199), encode it in an infrmational response code
 	if r.StatusCode < 200 || r.StatusCode > 599 {
-		return nil, fmt.Errorf("Informational responses not supported")
+		return nil, errInformationalNotSupported
 	}
 
 	// Response control data
@@ -478,8 +479,8 @@ func (r *BinaryResponse) Marshal() ([]byte, error) {
 	b.Write(controlData.Marshal())
 
 	// Header fields
-	fields := responseHeaderFields(r)
-	encodeVarintSlice(b, fields.Marshal())
+	headerFields := responseHeaderFields(r)
+	encodeVarintSlice(b, headerFields.Marshal())
 
 	// Content
 	if r.Body != nil {
@@ -491,6 +492,10 @@ func (r *BinaryResponse) Marshal() ([]byte, error) {
 	} else {
 		encodeVarintSlice(b, []byte{})
 	}
+
+	// Trailer fields
+	trailerFields := responseTrailerFields(r)
+	encodeVarintSlice(b, trailerFields.Marshal())
 
 	return b.Bytes(), nil
 }
@@ -524,7 +529,7 @@ func UnmarshalBinaryResponse(data []byte) (*http.Response, error) {
 
 	// TODO(caw): if the status code is informational, then parse subsequent fields
 	if finalStatusCode < 200 || finalStatusCode > 599 {
-		return nil, fmt.Errorf("Informational responses not yet supported")
+		return nil, errInformationalNotSupported
 	}
 
 	// Header fields
