@@ -56,12 +56,126 @@ func TestSimpleRequest(t *testing.T) {
 
 func TestSimpleResponse(t *testing.T) {
 	testResponse := &http.Response{
-		Body: ioutil.NopCloser(bytes.NewBufferString("test")),
+		StatusCode: 200,
+		Body:       ioutil.NopCloser(bytes.NewBufferString("test")),
 	}
 	binaryResponse := CreateBinaryResponse(testResponse)
 	_, err := binaryResponse.Marshal()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func createRequestFromParts(method string, url string, body []byte) *http.Request {
+	request, err := http.NewRequest(method, url, bytes.NewBuffer(body))
+	if err != nil {
+		panic(err)
+	}
+	return request
+}
+
+func TestRequestControlData(t *testing.T) {
+	tests := []struct {
+		request *http.Request
+		enc     []byte
+	}{
+		{
+			request: createRequestFromParts(http.MethodGet, "https://example.com/index.html", nil),
+			enc: []byte{
+				3, 'G', 'E', 'T',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+			},
+		},
+		{
+			request: createRequestFromParts(http.MethodPost, "https://example.com/index.html", nil),
+			enc: []byte{
+				4, 'P', 'O', 'S', 'T',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+			},
+		},
+		{
+			request: createRequestFromParts(http.MethodDelete, "https://example.com/index.html", nil),
+			enc: []byte{
+				6, 'D', 'E', 'L', 'E', 'T', 'E',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+			},
+		},
+		{
+			request: createRequestFromParts(http.MethodHead, "https://example.com/index.html", nil),
+			enc: []byte{
+				4, 'H', 'E', 'A', 'D',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+			},
+		},
+		{
+			request: createRequestFromParts(http.MethodOptions, "https://example.com/index.html", nil),
+			enc: []byte{
+				7, 'O', 'P', 'T', 'I', 'O', 'N', 'S',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+			},
+		},
+		{
+			request: createRequestFromParts(http.MethodPatch, "https://example.com/index.html", nil),
+			enc: []byte{
+				5, 'P', 'A', 'T', 'C', 'H',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+			},
+		},
+		{
+			request: createRequestFromParts(http.MethodPut, "https://example.com/index.html", nil),
+			enc: []byte{
+				3, 'P', 'U', 'T',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+			},
+		},
+		{
+			request: createRequestFromParts(http.MethodTrace, "https://example.com/index.html", nil),
+			enc: []byte{
+				5, 'T', 'R', 'A', 'C', 'E',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+			},
+		},
+		{
+			request: createRequestFromParts(http.MethodGet, "http://example.com/index.html", nil),
+			enc: []byte{
+				3, 'G', 'E', 'T',
+				4, 'h', 't', 't', 'p',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+			},
+		},
+		{
+			request: createRequestFromParts(http.MethodGet, "http://example.com", nil),
+			enc: []byte{
+				3, 'G', 'E', 'T',
+				4, 'h', 't', 't', 'p',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				0,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		binaryRequest := BinaryRequest(*test.request)
+		controlData := createRequestControlData(&binaryRequest)
+		encoded := controlData.Marshal()
+		require.Equal(t, encoded, test.enc, "Control data encoding mismatch")
 	}
 }
 

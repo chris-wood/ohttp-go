@@ -55,14 +55,14 @@ func readVarintSlice(b *bytes.Buffer) ([]byte, error) {
 	return value, nil
 }
 
-// Request with Known-Length {
-// 	Framing Indicator (i) = 0,
-// 	Request Control Data (..),
-// 	Known-Length Field Section (..),
-// 	Known-Length Content (..),
-// 	Known-Length Field Section (..),
-// 	Padding (..),
-// }
+//	Request with Known-Length {
+//		Framing Indicator (i) = 0,
+//		Request Control Data (..),
+//		Known-Length Field Section (..),
+//		Known-Length Content (..),
+//		Known-Length Field Section (..),
+//		Padding (..),
+//	}
 func (r *BinaryRequest) Marshal() ([]byte, error) {
 	b := new(bytes.Buffer)
 
@@ -74,8 +74,8 @@ func (r *BinaryRequest) Marshal() ([]byte, error) {
 	b.Write(controlData.Marshal())
 
 	// Header fields
-	fields := requestHeaderFields(r)
-	encodeVarintSlice(b, fields.Marshal())
+	headerFields := requestHeaderFields(r)
+	encodeVarintSlice(b, headerFields.Marshal())
 
 	// Content
 	if r.Body != nil {
@@ -89,8 +89,8 @@ func (r *BinaryRequest) Marshal() ([]byte, error) {
 	}
 
 	// Trailer fields
-	// Note: trailer fields are currently not supported
-	Write(b, uint64(0))
+	trailerFields := requestTrailerFields(r)
+	encodeVarintSlice(b, trailerFields.Marshal())
 
 	return b.Bytes(), nil
 }
@@ -128,22 +128,36 @@ func UnmarshalBinaryRequest(data []byte) (*http.Request, error) {
 		break
 	case http.MethodPost:
 		break
+	case http.MethodDelete:
+		break
+	case http.MethodPatch:
+		break
+	case http.MethodPut:
+		break
+	case http.MethodOptions:
+		break
+	case http.MethodTrace:
+		break
+	case http.MethodHead:
+		break
+	case http.MethodConnect:
+		break
 	default:
 		return nil, fmt.Errorf("Unsupported binary HTTP message request method: %s", controlData.method)
 	}
 
 	// Header fields
-	fields := new(fieldList)
+	headerFields := new(fieldList)
 	encodedFieldData, err := readVarintSlice(b)
 	if err != nil {
 		return nil, err
 	}
-	err = fields.Unmarshal(bytes.NewBuffer(encodedFieldData))
+	err = headerFields.Unmarshal(bytes.NewBuffer(encodedFieldData))
 	if err != nil {
 		return nil, err
 	}
 	headerMap := make(map[string]string)
-	for _, field := range fields.fields {
+	for _, field := range headerFields.fields {
 		headerMap[field.name] = field.value
 	}
 
@@ -166,31 +180,42 @@ func UnmarshalBinaryRequest(data []byte) (*http.Request, error) {
 		return nil, err
 	}
 
-	// Trailer
-	// XXX(caw): this is currently unsupported
+	// Trailer fields
+	trailerFields := new(fieldList)
+	encodedFieldData, err = readVarintSlice(b)
+	if err != nil {
+		return nil, err
+	}
+	err = trailerFields.Unmarshal(bytes.NewBuffer(encodedFieldData))
+	if err != nil {
+		return nil, err
+	}
 
 	// Construct the raw request
 	request, err := http.NewRequest(controlData.method, url.String(), bytes.NewBuffer(content))
 	if err != nil {
 		return nil, err
 	}
-	for _, field := range fields.fields {
+	for _, field := range headerFields.fields {
 		request.Header.Set(field.name, field.value)
+	}
+	for _, field := range trailerFields.fields {
+		request.Trailer.Set(field.name, field.value)
 	}
 
 	return request, nil
 }
 
-// Request Control Data {
-// 	Method Length (i),
-// 	Method (..),
-// 	Scheme Length (i),
-// 	Scheme (..),
-// 	Authority Length (i),
-// 	Authority (..),
-// 	Path Length (i),
-// 	Path (..),
-// }
+//	Request Control Data {
+//		Method Length (i),
+//		Method (..),
+//		Scheme Length (i),
+//		Scheme (..),
+//		Authority Length (i),
+//		Authority (..),
+//		Path Length (i),
+//		Path (..),
+//	}
 type requestControlData struct {
 	method    string
 	scheme    string
@@ -247,9 +272,9 @@ func UnmarshalRequestControlData(b *bytes.Buffer) (requestControlData, error) {
 	}, nil
 }
 
-// Final Response Control Data {
-// 	Status Code (i) = 200..599,
-//   }
+//	Final Response Control Data {
+//		Status Code (i) = 200..599,
+//	  }
 type responseControlData struct {
 	statusCode int
 }
@@ -308,8 +333,16 @@ func requestHeaderFields(r *BinaryRequest) fieldList {
 	return createHeaderFields(r.Header)
 }
 
+func requestTrailerFields(r *BinaryRequest) fieldList {
+	return createHeaderFields(r.Trailer)
+}
+
 func responseHeaderFields(r *BinaryResponse) fieldList {
 	return createHeaderFields(r.Header)
+}
+
+func responseTrailerFields(r *BinaryResponse) fieldList {
+	return createHeaderFields(r.Trailer)
 }
 
 func (f field) Marshal() []byte {
@@ -394,20 +427,25 @@ func (d infoResponseControlData) Marshal() []byte {
 	return b.Bytes()
 }
 
-// Response with Known-Length {
-// 	Framing Indicator (i) = 1,
-// 	Known-Length Informational Response (..) ...,
-// 	Final Response Control Data (..),
-// 	Known-Length Field Section (..),
-// 	Known-Length Content (..),
-// 	Known-Length Field Section (..),
-// 	Padding (..),
-//   }
+//	Response with Known-Length {
+//		Framing Indicator (i) = 1,
+//		Known-Length Informational Response (..) ...,
+//		Final Response Control Data (..),
+//		Known-Length Field Section (..),
+//		Known-Length Content (..),
+//		Known-Length Field Section (..),
+//		Padding (..),
+//	  }
 func (r *BinaryResponse) Marshal() ([]byte, error) {
 	b := new(bytes.Buffer)
 
 	// Framing
 	b.Write(knownLengthResponseFrame.Marshal())
+
+	// TODO(caw): if the response is informational (100..199), encode it in an infrmational response code
+	if r.StatusCode < 200 || r.StatusCode > 599 {
+		return nil, fmt.Errorf("Informational responses not supported")
+	}
 
 	// Response control data
 	controlData := finalResponseControlData{r.StatusCode}
@@ -458,18 +496,23 @@ func UnmarshalBinaryResponse(data []byte) (*http.Response, error) {
 		return nil, err
 	}
 
+	// TODO(caw): if the status code is informational, then parse subsequent fields
+	if finalStatusCode < 200 || finalStatusCode > 599 {
+		return nil, fmt.Errorf("Informational responses not yet supported")
+	}
+
 	// Header fields
-	fields := new(fieldList)
+	headerFields := new(fieldList)
 	encodedFieldData, err := readVarintSlice(b)
 	if err != nil {
 		return nil, err
 	}
-	err = fields.Unmarshal(bytes.NewBuffer(encodedFieldData))
+	err = headerFields.Unmarshal(bytes.NewBuffer(encodedFieldData))
 	if err != nil {
 		return nil, err
 	}
 	headerMap := make(map[string][]string)
-	for _, field := range fields.fields {
+	for _, field := range headerFields.fields {
 		headerMap[field.name] = []string{field.value}
 	}
 
@@ -480,12 +523,25 @@ func UnmarshalBinaryResponse(data []byte) (*http.Response, error) {
 	}
 
 	// Trailer
-	// XXX(caw): this is currently unsupported
+	trailerFields := new(fieldList)
+	encodedFieldData, err = readVarintSlice(b)
+	if err != nil {
+		return nil, err
+	}
+	err = trailerFields.Unmarshal(bytes.NewBuffer(encodedFieldData))
+	if err != nil {
+		return nil, err
+	}
+	trailerMap := make(map[string][]string)
+	for _, field := range trailerFields.fields {
+		trailerMap[field.name] = []string{field.value}
+	}
 
 	// Construct the raw request
 	resp := &http.Response{
 		StatusCode: int(finalStatusCode),
 		Header:     headerMap,
+		Trailer:    trailerMap,
 		Body:       ioutil.NopCloser(bytes.NewReader(content)),
 	}
 
