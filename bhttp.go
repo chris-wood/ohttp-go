@@ -2,6 +2,7 @@ package ohttp
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -16,11 +17,26 @@ type BinaryResponse http.Response
 type frameIndicator uint64
 
 const (
+	// Framing indicators
 	knownLengthRequestFrame    = frameIndicator(0)
 	knownLengthResponseFrame   = frameIndicator(1)
 	unknownLengthRequestFrame  = frameIndicator(2)
 	unknownLengthResponseFrame = frameIndicator(3)
 )
+
+var (
+	errProhibitedField = errors.New("Prohibited field detected")
+)
+
+func isProhibitedField(fieldName string) bool {
+	prohibitedFields := []string{":method", ":scheme", ":authority", ":path", ":status"}
+	for _, field := range prohibitedFields {
+		if field == fieldName {
+			return true
+		}
+	}
+	return false
+}
 
 func (f frameIndicator) Marshal() []byte {
 	b := new(bytes.Buffer)
@@ -158,6 +174,9 @@ func UnmarshalBinaryRequest(data []byte) (*http.Request, error) {
 	}
 	headerMap := make(map[string]string)
 	for _, field := range headerFields.fields {
+		if isProhibitedField(field.name) {
+			return nil, errProhibitedField
+		}
 		headerMap[field.name] = field.value
 	}
 
@@ -189,6 +208,11 @@ func UnmarshalBinaryRequest(data []byte) (*http.Request, error) {
 	err = trailerFields.Unmarshal(bytes.NewBuffer(encodedFieldData))
 	if err != nil {
 		return nil, err
+	}
+	for _, field := range trailerFields.fields {
+		if isProhibitedField(field.name) {
+			return nil, errProhibitedField
+		}
 	}
 
 	// Construct the raw request
@@ -313,9 +337,11 @@ func createHeaderFields(h http.Header) fieldList {
 	for h, v := range h {
 		// Convert the list of values to a string
 		b := new(bytes.Buffer)
-		for _, s := range v {
+		for i, s := range v {
 			b.Write([]byte(s))
-			b.Write([]byte(" "))
+			if i < len(v)-1 {
+				b.Write([]byte(" "))
+			}
 		}
 
 		fields[i] = field{

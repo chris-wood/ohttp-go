@@ -194,14 +194,14 @@ type EncapsulatedRequest struct {
 	ct     []byte
 }
 
-// Encapsulated Request {
-// 	Key Identifier (8),
-// 	KEM Identifier (16),
-// 	KDF Identifier (16),
-// 	AEAD Identifier (16),
-// 	Encapsulated KEM Shared Secret (8*Nenc),
-// 	AEAD-Protected Request (..),
-// }
+//	Encapsulated Request {
+//		Key Identifier (8),
+//		KEM Identifier (16),
+//		KDF Identifier (16),
+//		AEAD Identifier (16),
+//		Encapsulated KEM Shared Secret (8*Nenc),
+//		AEAD-Protected Request (..),
+//	}
 func (r EncapsulatedRequest) Marshal() []byte {
 	b := cryptobyte.NewBuilder(nil)
 
@@ -278,10 +278,10 @@ type EncapsulatedResponse struct {
 	raw []byte
 }
 
-// Encapsulated Response {
-// 	Nonce (Nk),
-// 	AEAD-Protected Response (..),
-// }
+//	Encapsulated Response {
+//		Nonce (Nk),
+//		AEAD-Protected Response (..),
+//	}
 func (r EncapsulatedResponse) Marshal() []byte {
 	return r.raw
 }
