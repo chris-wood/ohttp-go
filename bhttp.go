@@ -568,7 +568,7 @@ func UnmarshalBinaryResponse(data []byte) (*http.Response, error) {
 	// Trailer
 	trailerFields := new(fieldList)
 	encodedFieldData, err = readVarintSlice(b)
-	if err != nil {
+	if err != nil && err != io.EOF {
 		return nil, err
 	}
 	err = trailerFields.Unmarshal(bytes.NewBuffer(encodedFieldData))
