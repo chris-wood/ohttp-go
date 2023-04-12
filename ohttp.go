@@ -73,7 +73,7 @@ func (c PrivateConfig) PrivateKey() kem.PrivateKey {
 
 func NewConfigFromSeed(keyID uint8, kemID hpke.KEM, kdfID hpke.KDF, aeadID hpke.AEAD, seed []byte) (PrivateConfig, error) {
 	if !kemID.IsValid() || !kdfID.IsValid() || !aeadID.IsValid() {
-		return PrivateConfig{}, fmt.Errorf("Invalid ciphersuite: %04x, %04x, %04x", kemID, kdfID, aeadID)
+		return PrivateConfig{}, fmt.Errorf("invalid ciphersuite")
 	}
 
 	pk, sk := kemID.Scheme().DeriveKeyPair(seed)
@@ -104,7 +104,7 @@ func NewConfigFromSeed(keyID uint8, kemID hpke.KEM, kdfID hpke.KDF, aeadID hpke.
 
 func NewConfig(keyID uint8, kemID hpke.KEM, kdfID hpke.KDF, aeadID hpke.AEAD) (PrivateConfig, error) {
 	if !kemID.IsValid() || !kdfID.IsValid() || !aeadID.IsValid() {
-		return PrivateConfig{}, fmt.Errorf("Invalid ciphersuite")
+		return PrivateConfig{}, fmt.Errorf("invalid ciphersuite")
 	}
 	ikm := make([]byte, kemID.Scheme().PrivateKeySize())
 	rand.Reader.Read(ikm)
@@ -135,22 +135,22 @@ func UnmarshalPublicConfig(data []byte) (PublicConfig, error) {
 	var kemID uint16
 	if !s.ReadUint8(&id) ||
 		!s.ReadUint16(&kemID) {
-		return PublicConfig{}, fmt.Errorf("Invalid config")
+		return PublicConfig{}, fmt.Errorf("invalid config")
 	}
 
 	kem := hpke.KEM(kemID)
 	if !kem.IsValid() {
-		return PublicConfig{}, fmt.Errorf("Invalid KEM")
+		return PublicConfig{}, fmt.Errorf("invalid KEM")
 	}
 
 	publicKeyBytes := make([]byte, kem.Scheme().PublicKeySize())
 	if !s.ReadBytes(&publicKeyBytes, len(publicKeyBytes)) {
-		return PublicConfig{}, fmt.Errorf("Invalid config")
+		return PublicConfig{}, fmt.Errorf("invalid config")
 	}
 
 	var cipherSuites cryptobyte.String
 	if !s.ReadUint16LengthPrefixed(&cipherSuites) {
-		return PublicConfig{}, fmt.Errorf("Invalid config")
+		return PublicConfig{}, fmt.Errorf("invalid config")
 	}
 	suites := []ConfigCipherSuite{}
 	for !cipherSuites.Empty() {
@@ -158,17 +158,17 @@ func UnmarshalPublicConfig(data []byte) (PublicConfig, error) {
 		var aeadID uint16
 		if !cipherSuites.ReadUint16(&kdfID) ||
 			!cipherSuites.ReadUint16(&aeadID) {
-			return PublicConfig{}, fmt.Errorf("Invalid config")
+			return PublicConfig{}, fmt.Errorf("invalid config")
 		}
 
 		// Sanity check validity of the KDF and AEAD values
 		kdf := hpke.KDF(kdfID)
 		if !kdf.IsValid() {
-			return PublicConfig{}, fmt.Errorf("Invalid KDF")
+			return PublicConfig{}, fmt.Errorf("invalid KDF")
 		}
 		aead := hpke.AEAD(aeadID)
 		if !aead.IsValid() {
-			return PublicConfig{}, fmt.Errorf("Invalid AEAD")
+			return PublicConfig{}, fmt.Errorf("invalid AEAD")
 		}
 
 		suites = append(suites, ConfigCipherSuite{
@@ -414,7 +414,7 @@ func (g Gateway) Config(keyID uint8) (PublicConfig, error) {
 	if config, ok := g.keyMap[keyID]; ok {
 		return config.Config(), nil
 	}
-	return PublicConfig{}, fmt.Errorf("Unknown keyID %d", keyID)
+	return PublicConfig{}, fmt.Errorf("unknown keyID %d", keyID)
 }
 
 func (g Gateway) Client(keyID uint8) (Client, error) {
@@ -462,11 +462,11 @@ type DecapsulateRequestContext struct {
 func (s Gateway) DecapsulateRequest(req EncapsulatedRequest) ([]byte, DecapsulateRequestContext, error) {
 	config, ok := s.keyMap[req.KeyID]
 	if !ok {
-		return nil, DecapsulateRequestContext{}, fmt.Errorf("Unknown key ID")
+		return nil, DecapsulateRequestContext{}, fmt.Errorf("unknown key ID")
 	}
 
 	if !config.config.KEMID.IsValid() || !req.kdfID.IsValid() || !req.aeadID.IsValid() {
-		return nil, DecapsulateRequestContext{}, fmt.Errorf("Invalid ciphersuite")
+		return nil, DecapsulateRequestContext{}, fmt.Errorf("invalid ciphersuite")
 	}
 	suite := hpke.NewSuite(config.config.KEMID, req.kdfID, req.aeadID)
 
@@ -482,6 +482,9 @@ func (s Gateway) DecapsulateRequest(req EncapsulatedRequest) ([]byte, Decapsulat
 	info = append(info, buffer...)
 
 	receiver, err := suite.NewReceiver(config.sk, info)
+	if err != nil {
+		return nil, DecapsulateRequestContext{}, err
+	}
 	context, err := receiver.Setup(req.enc)
 	if err != nil {
 		return nil, DecapsulateRequestContext{}, err
@@ -514,7 +517,7 @@ func encapsulateResponse(context hpke.Opener, response, responseNonce []byte, en
 	secret := context.Export(responseLabel, AEAD.KeySize())
 
 	// salt = concat(enc, response_nonce)
-	salt := append(append(enc, responseNonce...))
+	salt := append(enc, responseNonce...)
 
 	// prk = Extract(salt, secret)
 	prk := KDF.Extract(secret, salt)
