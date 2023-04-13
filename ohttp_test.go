@@ -9,7 +9,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/cisco/go-hpke"
+	"github.com/cloudflare/circl/hpke"
+	"github.com/cloudflare/circl/kem"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,7 +20,7 @@ const (
 )
 
 func TestConfigSerialize(t *testing.T) {
-	privateConfig, err := NewConfig(0x00, hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128)
+	privateConfig, err := NewConfig(0x00, hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
 	require.Nil(t, err, "CreatePrivateConfig failed")
 
 	config := privateConfig.config
@@ -31,7 +32,7 @@ func TestConfigSerialize(t *testing.T) {
 }
 
 func TestRoundTrip(t *testing.T) {
-	privateConfig, err := NewConfig(0x00, hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128)
+	privateConfig, err := NewConfig(0x00, hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
 	require.Nil(t, err, "CreatePrivateConfig failed")
 
 	client := NewDefaultClient(privateConfig.config)
@@ -56,7 +57,7 @@ func TestRoundTrip(t *testing.T) {
 }
 
 func TestCustomRoundTrip(t *testing.T) {
-	privateConfig, err := NewConfig(0x00, hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128)
+	privateConfig, err := NewConfig(0x00, hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
 	require.Nil(t, err, "CreatePrivateConfig failed")
 
 	customRequestLabel := "message/app-specific-type req"
@@ -84,7 +85,7 @@ func TestCustomRoundTrip(t *testing.T) {
 }
 
 func TestEncodingMismatchFailure(t *testing.T) {
-	privateConfig, err := NewConfig(0x00, hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128)
+	privateConfig, err := NewConfig(0x00, hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
 	require.Nil(t, err, "CreatePrivateConfig failed")
 
 	customRequestLabel := "message/dns req"
@@ -103,7 +104,7 @@ func TestEncodingMismatchFailure(t *testing.T) {
 	require.Nil(t, receivedReq, "Request not nil")
 }
 
-///////
+// /////
 // Infallible Serialize / Deserialize
 func fatalOnError(t *testing.T, err error, msg string) {
 	realMsg := fmt.Sprintf("%s: %v", msg, err)
@@ -126,33 +127,43 @@ func mustHex(d []byte) string {
 	return hex.EncodeToString(d)
 }
 
-func mustDeserializePriv(t *testing.T, suite hpke.CipherSuite, h string, required bool) hpke.KEMPrivateKey {
+func mustDeserializePriv(t *testing.T, suite hpke.Suite, h string, required bool) kem.PrivateKey {
+	KEM, _, _ := suite.Params()
 	skm := mustUnhex(t, h)
-	sk, err := suite.KEM.DeserializePrivateKey(skm)
+	sk, err := KEM.Scheme().UnmarshalBinaryPrivateKey(skm)
 	if required {
 		fatalOnError(t, err, "DeserializePrivate failed")
 	}
 	return sk
 }
 
-func mustSerializePriv(suite hpke.CipherSuite, priv hpke.KEMPrivateKey) string {
-	return mustHex(suite.KEM.SerializePrivateKey(priv))
+func mustSerializePriv(suite hpke.Suite, priv kem.PrivateKey) string {
+	skEnc, err := priv.MarshalBinary()
+	if err != nil {
+		panic(err)
+	}
+	return mustHex(skEnc)
 }
 
-func mustDeserializePub(t *testing.T, suite hpke.CipherSuite, h string, required bool) hpke.KEMPublicKey {
+func mustDeserializePub(t *testing.T, suite hpke.Suite, h string, required bool) kem.PublicKey {
+	KEM, _, _ := suite.Params()
 	pkm := mustUnhex(t, h)
-	pk, err := suite.KEM.DeserializePublicKey(pkm)
+	pk, err := KEM.Scheme().UnmarshalBinaryPublicKey(pkm)
 	if required {
 		fatalOnError(t, err, "DeserializePublicKey failed")
 	}
 	return pk
 }
 
-func mustSerializePub(suite hpke.CipherSuite, pub hpke.KEMPublicKey) string {
-	return mustHex(suite.KEM.SerializePublicKey(pub))
+func mustSerializePub(suite hpke.Suite, pub kem.PublicKey) string {
+	pkEnc, err := pub.MarshalBinary()
+	if err != nil {
+		panic(err)
+	}
+	return mustHex(pkEnc)
 }
 
-///////
+// /////
 // Query/Response transaction test vector structure
 type rawTransactionTestVector struct {
 	Request              string `json:"request"`
@@ -203,9 +214,9 @@ func (etv *transactionTestVector) UnmarshalJSON(data []byte) error {
 }
 
 type rawTestVector struct {
-	KEMID        hpke.KEMID              `json:"kem_id"`
-	KDFID        hpke.KDFID              `json:"kdf_id"`
-	AEADID       hpke.AEADID             `json:"aead_id"`
+	KEMID        hpke.KEM                `json:"kem_id"`
+	KDFID        hpke.KDF                `json:"kdf_id"`
+	AEADID       hpke.AEAD               `json:"aead_id"`
 	ConfigSeed   string                  `json:"config_seed"`
 	Config       string                  `json:"config"`
 	Transactions []transactionTestVector `json:"transactions"`
@@ -213,11 +224,11 @@ type rawTestVector struct {
 
 type testVector struct {
 	t     *testing.T
-	suite hpke.CipherSuite
+	suite hpke.Suite
 
-	kemID  hpke.KEMID
-	kdfID  hpke.KDFID
-	aeadID hpke.AEADID
+	kemID  hpke.KEM
+	kdfID  hpke.KDF
+	aeadID hpke.AEAD
 
 	configSeed []byte
 	config     PublicConfig
@@ -273,7 +284,7 @@ func (tva *testVectorArray) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func generateTestVector(t *testing.T, kemID hpke.KEMID, kdfID hpke.KDFID, aeadID hpke.AEADID) testVector {
+func generateTestVector(t *testing.T, kemID hpke.KEM, kdfID hpke.KDF, aeadID hpke.AEAD) testVector {
 	privateConfig, err := NewConfig(0x00, kemID, kdfID, aeadID)
 	require.Nil(t, err, "NewConfig failed")
 
@@ -351,9 +362,9 @@ func verifyTestVectors(t *testing.T, encoded []byte) {
 }
 
 func TestVectorGenerate(t *testing.T) {
-	supportedKEMs := []hpke.KEMID{hpke.DHKEM_X25519}
-	supportedKDFs := []hpke.KDFID{hpke.KDF_HKDF_SHA256}
-	supportedAEADs := []hpke.AEADID{hpke.AEAD_AESGCM128}
+	supportedKEMs := []hpke.KEM{hpke.KEM_X25519_HKDF_SHA256}
+	supportedKDFs := []hpke.KDF{hpke.KDF_HKDF_SHA256}
+	supportedAEADs := []hpke.AEAD{hpke.AEAD_AES128GCM}
 
 	vectors := make([]testVector, 0)
 	for _, kemID := range supportedKEMs {
@@ -406,16 +417,13 @@ func disableTestDraftVector(t *testing.T) {
 	expectedEncapResponse := mustUnhex(t, "c789e7151fcba46158ca84b04464910d86f9013e404feea014e7be4a441f234f857fbd")
 	responseNonce := mustUnhex(t, "4b28f881333e7c164ffc499ad9796f877f4e1051ee6d31bad19dec96c208b472c789e7151fcba46158ca84b04464910d")[32:]
 
-	suite, err := hpke.AssembleCipherSuite(hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128)
-	if err != nil {
-		t.Fatal(err)
-	}
+	KEM := hpke.KEM_X25519_HKDF_SHA256
 
-	skR, err := suite.KEM.DeserializePrivateKey(skSEnc)
+	skR, err := KEM.Scheme().UnmarshalBinaryPrivateKey(skSEnc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	skE, err := suite.KEM.DeserializePrivateKey(skEEnc)
+	skE, err := KEM.Scheme().UnmarshalBinaryPrivateKey(skEEnc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +436,7 @@ func disableTestDraftVector(t *testing.T) {
 		seed:   nil,
 		config: config,
 		sk:     skR,
-		pk:     skR.PublicKey(),
+		pk:     skR.Public(),
 	}
 
 	client := Client{
@@ -475,7 +483,7 @@ func disableTestDraftVector(t *testing.T) {
 }
 
 func BenchmarkRoundTrip(b *testing.B) {
-	privateConfig, err := NewConfig(0x00, hpke.DHKEM_X25519, hpke.KDF_HKDF_SHA256, hpke.AEAD_AESGCM128)
+	privateConfig, err := NewConfig(0x00, hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
 	require.Nil(b, err, "CreatePrivateConfig failed")
 
 	client := NewDefaultClient(privateConfig.config)
