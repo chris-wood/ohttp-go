@@ -12,6 +12,7 @@ import (
 	"github.com/cloudflare/circl/hpke"
 	"github.com/cloudflare/circl/kem"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/cryptobyte"
 )
 
 const (
@@ -29,6 +30,39 @@ func TestConfigSerialize(t *testing.T) {
 	recoveredConfig, err := UnmarshalPublicConfig(serializedConfig)
 	require.Nil(t, err, "UnmarshalPublicConfig failed")
 	require.True(t, config.IsEqual(recoveredConfig), "Config mismatch")
+}
+
+func TestConfigListSerialize(t *testing.T) {
+	privateConfigA, err := NewConfig(0x00, hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
+	privateConfigB, err := NewConfig(0x01, hpke.KEM_X25519_KYBER768_DRAFT00, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
+	require.Nil(t, err, "CreatePrivateConfig failed")
+
+	gateway := NewDefaultGateway([]PrivateConfig{privateConfigA, privateConfigB})
+	serializedConfigs := gateway.MarshalConfigs()
+
+	s := cryptobyte.String(serializedConfigs)
+
+	// Parse and validate configuration A
+	var serializedConfigA cryptobyte.String
+	if !s.ReadUint16LengthPrefixed(&serializedConfigA) {
+		t.Fatal("Failed to decode length-prefix-encoded config")
+	}
+
+	recoveredConfigA, err := UnmarshalPublicConfig(serializedConfigA)
+	require.Nil(t, err, "UnmarshalPublicConfig failed")
+	require.True(t, privateConfigA.publicConfig.IsEqual(recoveredConfigA), "Config A mismatch")
+
+	// Parse and validate configuration B
+	var serializedConfigB cryptobyte.String
+	if !s.ReadUint16LengthPrefixed(&serializedConfigB) {
+		t.Fatal("Failed to decode length-prefix-encoded config")
+	}
+
+	recoveredConfigB, err := UnmarshalPublicConfig(serializedConfigB)
+	require.Nil(t, err, "UnmarshalPublicConfig failed")
+	require.True(t, privateConfigB.publicConfig.IsEqual(recoveredConfigB), "Config B mismatch")
+
+	require.Equal(t, 0, len(s))
 }
 
 func TestRoundTrip(t *testing.T) {

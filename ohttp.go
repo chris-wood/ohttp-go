@@ -106,7 +106,7 @@ func NewConfig(keyID uint8, kemID hpke.KEM, kdfID hpke.KDF, aeadID hpke.AEAD) (P
 	if !kemID.IsValid() || !kdfID.IsValid() || !aeadID.IsValid() {
 		return PrivateConfig{}, fmt.Errorf("invalid ciphersuite")
 	}
-	ikm := make([]byte, kemID.Scheme().PrivateKeySize())
+	ikm := make([]byte, kemID.Scheme().SeedSize())
 	rand.Reader.Read(ikm)
 
 	return NewConfigFromSeed(keyID, kemID, kdfID, aeadID, ikm)
@@ -471,6 +471,24 @@ type DecapsulateRequestContext struct {
 func (s Gateway) MatchesConfig(req EncapsulatedRequest) bool {
 	_, ok := s.keyMap[req.KeyID]
 	return ok
+}
+
+func (s Gateway) MarshalConfigs() []byte {
+	b := cryptobyte.NewBuilder(nil)
+
+	// Marshal the configurations in order sorted by their configuration ID
+	keys := make([]uint8, len(s.keyMap))
+	i := 0
+	for k := range s.keyMap {
+		keys[i] = k
+		i++
+	}
+	for _, id := range keys {
+		b.AddUint16LengthPrefixed(func(b *cryptobyte.Builder) {
+			b.AddBytes(s.keyMap[id].publicConfig.Marshal())
+		})
+	}
+	return b.BytesOrPanic()
 }
 
 func (s Gateway) DecapsulateRequest(req EncapsulatedRequest) ([]byte, DecapsulateRequestContext, error) {
