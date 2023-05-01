@@ -13,7 +13,7 @@ import (
 )
 
 type xKEM struct {
-	kemBase
+	dhKemBase
 	size int
 }
 
@@ -59,7 +59,7 @@ func (x xKEM) DeriveKeyPair(seed []byte) (kem.PublicKey, kem.PrivateKey) {
 		panic(kem.ErrSeedSize)
 	}
 	sk := &xKEMPrivKey{scheme: x, priv: make([]byte, x.size)}
-	dkpPrk := x.labeledExtract(nil, []byte("dkp_prk"), seed)
+	dkpPrk := x.labeledExtract([]byte(""), []byte("dkp_prk"), seed)
 	bytes := x.labeledExpand(
 		dkpPrk,
 		[]byte("sk"),
@@ -86,6 +86,9 @@ func (x xKEM) UnmarshalBinaryPrivateKey(data []byte) (kem.PrivateKey, error) {
 	}
 	sk := &xKEMPrivKey{x, make([]byte, l), nil}
 	copy(sk.priv, data[:l])
+	if !sk.validate() {
+		return nil, ErrInvalidKEMPrivateKey
+	}
 	return sk, nil
 }
 
@@ -96,6 +99,9 @@ func (x xKEM) UnmarshalBinaryPublicKey(data []byte) (kem.PublicKey, error) {
 	}
 	pk := &xKEMPubKey{x, make([]byte, l)}
 	copy(pk.pub, data[:l])
+	if !pk.validate() {
+		return nil, ErrInvalidKEMPublicKey
+	}
 	return pk, nil
 }
 
@@ -116,7 +122,7 @@ func (k *xKEMPubKey) Equal(pk kem.PublicKey) bool {
 		k.scheme.id == k1.scheme.id &&
 		bytes.Equal(k.pub, k1.pub)
 }
-func (k *xKEMPubKey) Validate() bool { return len(k.pub) == k.scheme.PublicKeySize() }
+func (k *xKEMPubKey) validate() bool { return len(k.pub) == k.scheme.PublicKeySize() }
 
 type xKEMPrivKey struct {
 	scheme xKEM
@@ -155,4 +161,4 @@ func (k *xKEMPrivKey) Public() kem.PublicKey {
 	}
 	return k.pub
 }
-func (k *xKEMPrivKey) Validate() bool { return len(k.priv) == k.scheme.PrivateKeySize() }
+func (k *xKEMPrivKey) validate() bool { return len(k.priv) == k.scheme.PrivateKeySize() }
