@@ -57,14 +57,14 @@ func (c PublicConfig) IsEqual(o PublicConfig) bool {
 }
 
 type PrivateConfig struct {
-	seed   []byte
-	config PublicConfig
-	sk     kem.PrivateKey
-	pk     kem.PublicKey
+	seed         []byte
+	publicConfig PublicConfig
+	sk           kem.PrivateKey
+	pk           kem.PublicKey
 }
 
 func (c PrivateConfig) Config() PublicConfig {
-	return c.config
+	return c.publicConfig
 }
 
 func (c PrivateConfig) PrivateKey() kem.PrivateKey {
@@ -95,10 +95,10 @@ func NewConfigFromSeed(keyID uint8, kemID hpke.KEM, kdfID hpke.KDF, aeadID hpke.
 	}
 
 	return PrivateConfig{
-		seed:   seed,
-		config: publicConfig,
-		sk:     sk,
-		pk:     pk,
+		seed:         seed,
+		publicConfig: publicConfig,
+		sk:           sk,
+		pk:           pk,
 	}, nil
 }
 
@@ -429,26 +429,35 @@ func (g Gateway) Client(keyID uint8) (Client, error) {
 	}, nil
 }
 
-func NewDefaultGateway(config PrivateConfig) Gateway {
+func createConfigMap(configs []PrivateConfig) map[uint8]PrivateConfig {
+	configMap := make(map[uint8]PrivateConfig)
+	for _, config := range configs {
+		_, exists := configMap[config.publicConfig.ID]
+		if exists {
+			panic("Duplicate config key IDs")
+		}
+		configMap[config.publicConfig.ID] = config
+	}
+	return configMap
+}
+
+func NewDefaultGateway(configs []PrivateConfig) Gateway {
 	return Gateway{
 		requestLabel:  []byte(defaultLabelRequest),
 		responseLabel: []byte(defaultLabelResponse),
-		keyMap: map[uint8]PrivateConfig{
-			config.config.ID: config,
-		},
+		keyMap:        createConfigMap(configs),
 	}
 }
 
-func NewCustomGateway(config PrivateConfig, requestLabel, responseLabel string) Gateway {
+func NewCustomGateway(configs []PrivateConfig, requestLabel, responseLabel string) Gateway {
 	if requestLabel == "" || responseLabel == "" || requestLabel == responseLabel {
 		panic("Invalid request and response labels")
 	}
+
 	return Gateway{
 		requestLabel:  []byte(requestLabel),
 		responseLabel: []byte(responseLabel),
-		keyMap: map[uint8]PrivateConfig{
-			config.config.ID: config,
-		},
+		keyMap:        createConfigMap(configs),
 	}
 }
 
@@ -465,10 +474,10 @@ func (s Gateway) DecapsulateRequest(req EncapsulatedRequest) ([]byte, Decapsulat
 		return nil, DecapsulateRequestContext{}, fmt.Errorf("unknown key ID")
 	}
 
-	if !config.config.KEMID.IsValid() || !req.kdfID.IsValid() || !req.aeadID.IsValid() {
+	if !config.publicConfig.KEMID.IsValid() || !req.kdfID.IsValid() || !req.aeadID.IsValid() {
 		return nil, DecapsulateRequestContext{}, fmt.Errorf("invalid ciphersuite")
 	}
-	suite := hpke.NewSuite(config.config.KEMID, req.kdfID, req.aeadID)
+	suite := hpke.NewSuite(config.publicConfig.KEMID, req.kdfID, req.aeadID)
 
 	info := s.requestLabel
 	info = append(info, 0x00)
