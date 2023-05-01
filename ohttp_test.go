@@ -23,7 +23,7 @@ func TestConfigSerialize(t *testing.T) {
 	privateConfig, err := NewConfig(0x00, hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
 	require.Nil(t, err, "CreatePrivateConfig failed")
 
-	config := privateConfig.config
+	config := privateConfig.publicConfig
 
 	serializedConfig := config.Marshal()
 	recoveredConfig, err := UnmarshalPublicConfig(serializedConfig)
@@ -35,8 +35,8 @@ func TestRoundTrip(t *testing.T) {
 	privateConfig, err := NewConfig(0x00, hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
 	require.Nil(t, err, "CreatePrivateConfig failed")
 
-	client := NewDefaultClient(privateConfig.config)
-	server := NewDefaultGateway(privateConfig)
+	client := NewDefaultClient(privateConfig.publicConfig)
+	server := NewDefaultGateway([]PrivateConfig{privateConfig})
 
 	rawRequest := []byte("why is the sky blue?")
 	rawResponse := []byte("because air is blue")
@@ -63,8 +63,8 @@ func TestCustomRoundTrip(t *testing.T) {
 	customRequestLabel := "message/app-specific-type req"
 	customResponseLabel := "message/app-specific-type rep"
 
-	client := NewCustomClient(privateConfig.config, customRequestLabel, customResponseLabel)
-	server := NewCustomGateway(privateConfig, customRequestLabel, customResponseLabel)
+	client := NewCustomClient(privateConfig.publicConfig, customRequestLabel, customResponseLabel)
+	server := NewCustomGateway([]PrivateConfig{privateConfig}, customRequestLabel, customResponseLabel)
 
 	rawRequest := []byte("why is the sky blue?")
 	rawResponse := []byte("because air is blue")
@@ -84,6 +84,33 @@ func TestCustomRoundTrip(t *testing.T) {
 	require.Equal(t, rawResponse, receivedResp, "Response mismatch")
 }
 
+func TestGatewayMultipleConfigsDuplicateKeyId(t *testing.T) {
+	defer func() { recover() }()
+
+	privateConfigA, err := NewConfig(0x00, hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
+	require.Nil(t, err, "CreatePrivateConfig failed")
+	privateConfigB, err := NewConfig(0x00, hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
+	require.Nil(t, err, "CreatePrivateConfig failed")
+
+	_ = NewDefaultGateway([]PrivateConfig{privateConfigA, privateConfigB})
+	t.Errorf("Multiple configs with the same key ID should cause a panic")
+}
+
+func TestGatewayMultipleConfigs(t *testing.T) {
+	defer func() { recover() }()
+
+	privateConfigA, err := NewConfig(0x00, hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
+	require.Nil(t, err, "CreatePrivateConfig failed")
+	privateConfigB, err := NewConfig(0x01, hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
+	require.Nil(t, err, "CreatePrivateConfig failed")
+
+	gateway := NewDefaultGateway([]PrivateConfig{privateConfigA, privateConfigB})
+	_, ok := gateway.keyMap[0x00]
+	require.True(t, ok)
+	_, ok = gateway.keyMap[0x01]
+	require.True(t, ok)
+}
+
 func TestEncodingMismatchFailure(t *testing.T) {
 	privateConfig, err := NewConfig(0x00, hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
 	require.Nil(t, err, "CreatePrivateConfig failed")
@@ -91,8 +118,8 @@ func TestEncodingMismatchFailure(t *testing.T) {
 	customRequestLabel := "message/dns req"
 	customResponseLabel := "message/dns rep"
 
-	client := NewDefaultClient(privateConfig.config)
-	server := NewCustomGateway(privateConfig, customRequestLabel, customResponseLabel)
+	client := NewDefaultClient(privateConfig.publicConfig)
+	server := NewCustomGateway([]PrivateConfig{privateConfig}, customRequestLabel, customResponseLabel)
 
 	rawRequest := []byte("why is the sky blue?")
 
@@ -288,8 +315,8 @@ func generateTestVector(t *testing.T, kemID hpke.KEM, kdfID hpke.KDF, aeadID hpk
 	privateConfig, err := NewConfig(0x00, kemID, kdfID, aeadID)
 	require.Nil(t, err, "NewConfig failed")
 
-	client := NewDefaultClient(privateConfig.config)
-	server := NewDefaultGateway(privateConfig)
+	client := NewDefaultClient(privateConfig.publicConfig)
+	server := NewDefaultGateway([]PrivateConfig{privateConfig})
 
 	rawRequest := []byte("why is the sky blue?")
 	rawResponse := []byte("because air is blue")
@@ -320,7 +347,7 @@ func generateTestVector(t *testing.T, kemID hpke.KEM, kdfID hpke.KDF, aeadID hpk
 		kdfID:        kdfID,
 		aeadID:       aeadID,
 		configSeed:   privateConfig.seed,
-		config:       privateConfig.config,
+		config:       privateConfig.publicConfig,
 		transactions: []transactionTestVector{transaction},
 	}
 }
@@ -329,8 +356,8 @@ func verifyTestVector(t *testing.T, vector testVector) {
 	privateConfig, err := NewConfigFromSeed(0x00, vector.kemID, vector.kdfID, vector.aeadID, vector.configSeed)
 	require.Nil(t, err, "NewConfigFromSeed failed")
 
-	client := NewDefaultClient(privateConfig.config)
-	server := NewDefaultGateway(privateConfig)
+	client := NewDefaultClient(privateConfig.publicConfig)
+	server := NewDefaultGateway([]PrivateConfig{privateConfig})
 
 	for _, transaction := range vector.transactions {
 		req, reqContext, err := client.EncapsulateRequest(transaction.request)
@@ -433,10 +460,10 @@ func disableTestDraftVector(t *testing.T) {
 		t.Fatal(err)
 	}
 	privateConfig := PrivateConfig{
-		seed:   nil,
-		config: config,
-		sk:     skR,
-		pk:     skR.Public(),
+		seed:         nil,
+		publicConfig: config,
+		sk:           skR,
+		pk:           skR.Public(),
 	}
 
 	client := Client{
@@ -486,8 +513,8 @@ func BenchmarkRoundTrip(b *testing.B) {
 	privateConfig, err := NewConfig(0x00, hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
 	require.Nil(b, err, "CreatePrivateConfig failed")
 
-	client := NewDefaultClient(privateConfig.config)
-	server := NewDefaultGateway(privateConfig)
+	client := NewDefaultClient(privateConfig.publicConfig)
+	server := NewDefaultGateway([]PrivateConfig{privateConfig})
 
 	rawRequest := []byte("why is the sky blue?")
 	rawResponse := []byte("because air is blue")
