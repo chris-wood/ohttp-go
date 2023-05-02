@@ -407,6 +407,7 @@ type Gateway struct {
 	requestLabel  []byte
 	responseLabel []byte
 	// map from IDs to private key(s)
+	keys   []uint8
 	keyMap map[uint8]PrivateConfig
 }
 
@@ -429,23 +430,27 @@ func (g Gateway) Client(keyID uint8) (Client, error) {
 	}, nil
 }
 
-func createConfigMap(configs []PrivateConfig) map[uint8]PrivateConfig {
+func createConfigMap(configs []PrivateConfig) ([]uint8, map[uint8]PrivateConfig) {
 	configMap := make(map[uint8]PrivateConfig)
+	keys := make([]uint8, 0)
 	for _, config := range configs {
 		_, exists := configMap[config.publicConfig.ID]
 		if exists {
 			panic("Duplicate config key IDs")
 		}
 		configMap[config.publicConfig.ID] = config
+		keys = append(keys, config.publicConfig.ID)
 	}
-	return configMap
+	return keys, configMap
 }
 
 func NewDefaultGateway(configs []PrivateConfig) Gateway {
+	keys, keyMap := createConfigMap(configs)
 	return Gateway{
 		requestLabel:  []byte(defaultLabelRequest),
 		responseLabel: []byte(defaultLabelResponse),
-		keyMap:        createConfigMap(configs),
+		keys:          keys,
+		keyMap:        keyMap,
 	}
 }
 
@@ -454,10 +459,12 @@ func NewCustomGateway(configs []PrivateConfig, requestLabel, responseLabel strin
 		panic("Invalid request and response labels")
 	}
 
+	keys, keyMap := createConfigMap(configs)
 	return Gateway{
 		requestLabel:  []byte(requestLabel),
 		responseLabel: []byte(responseLabel),
-		keyMap:        createConfigMap(configs),
+		keys:          keys,
+		keyMap:        keyMap,
 	}
 }
 
@@ -476,14 +483,7 @@ func (s Gateway) MatchesConfig(req EncapsulatedRequest) bool {
 func (s Gateway) MarshalConfigs() []byte {
 	b := cryptobyte.NewBuilder(nil)
 
-	// Marshal the configurations in order sorted by their configuration ID
-	keys := make([]uint8, len(s.keyMap))
-	i := 0
-	for k := range s.keyMap {
-		keys[i] = k
-		i++
-	}
-	for _, id := range keys {
+	for _, id := range s.keys {
 		b.AddUint16LengthPrefixed(func(b *cryptobyte.Builder) {
 			b.AddBytes(s.keyMap[id].publicConfig.Marshal())
 		})

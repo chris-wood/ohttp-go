@@ -33,8 +33,9 @@ func TestConfigSerialize(t *testing.T) {
 }
 
 func TestConfigListSerialize(t *testing.T) {
-	privateConfigA, err := NewConfig(0x00, hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
-	privateConfigB, err := NewConfig(0x01, hpke.KEM_X25519_KYBER768_DRAFT00, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
+	privateConfigA, err := NewConfig(0x01, hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
+	require.Nil(t, err, "CreatePrivateConfig failed")
+	privateConfigB, err := NewConfig(0x00, hpke.KEM_X25519_KYBER768_DRAFT00, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
 	require.Nil(t, err, "CreatePrivateConfig failed")
 
 	gateway := NewDefaultGateway([]PrivateConfig{privateConfigA, privateConfigB})
