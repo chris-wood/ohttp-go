@@ -1,7 +1,6 @@
 package ohttp
 
 import (
-	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -70,7 +69,8 @@ func TestRoundTrip(t *testing.T) {
 	privateConfig, err := NewConfig(0x00, hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
 	require.Nil(t, err, "CreatePrivateConfig failed")
 
-	client := NewDefaultClient(privateConfig.publicConfig)
+	client, err := NewDefaultClient(privateConfig.publicConfig)
+	require.Nil(t, err, "NewDefaultClient failed")
 	server := NewDefaultGateway([]PrivateConfig{privateConfig})
 
 	rawRequest := []byte("why is the sky blue?")
@@ -87,8 +87,90 @@ func TestRoundTrip(t *testing.T) {
 	require.Nil(t, err, "EncapsulateResponse failed")
 
 	receivedResp, err := reqContext.DecapsulateResponse(resp)
-	require.Nil(t, err, "EncapsulateResponse failed")
+	require.Nil(t, err, "DecapsulateResponse failed")
 	require.Equal(t, rawResponse, receivedResp, "Response mismatch")
+}
+
+func TestChunkedRoundTrip(t *testing.T) {
+	privateConfig, err := NewConfig(0x00, hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
+	require.Nil(t, err, "CreatePrivateConfig failed")
+
+	client, err := NewChunkedClient(privateConfig.publicConfig)
+	require.Nil(t, err, "NewChunkedClient failed")
+	server := NewChunkedGateway([]PrivateConfig{privateConfig})
+
+	rawRequestChunks := [][]byte{[]byte("hello"), []byte("world")}
+	encapsulatedRequestChunks := make([]EncapsulatedRequestChunk, len(rawRequestChunks))
+	gatewayRequestChunks := make([][]byte, len(encapsulatedRequestChunks))
+	rawResponseChunks := [][]byte{[]byte("foo"), []byte("bar")}
+	encapsulatedResponseChunks := make([]EncapsulatedResponseChunk, len(rawResponseChunks))
+	clientResponseChunks := make([][]byte, len(encapsulatedResponseChunks))
+
+	// Prepare the client context for chunk encapsulation
+	senderHeader, clientRequestContext, err := client.Prepare()
+
+	// Encapsulate each request chunk
+	require.Nil(t, err, "Prepare failed")
+	for i, _ := range rawRequestChunks {
+		if i < len(rawRequestChunks)-1 {
+			encapsulatedRequestChunks[i], err = clientRequestContext.EncapsulateRequestChunk(rawRequestChunks[i])
+			require.Nil(t, err, "EncapsulateRequestChunk failed")
+		} else {
+			encapsulatedRequestChunks[i], err = clientRequestContext.EncapsulateFinalRequestChunk(rawRequestChunks[i])
+			require.Nil(t, err, "EncapsulateFinalRequestChunk failed")
+		}
+	}
+
+	// Prepare the server context for request decapsulation and response encapsulation
+	gatewayRequestContext, responseHeader, gatewayResponseContext, err := server.Prepare(senderHeader)
+	require.Nil(t, err, "Prepare failed")
+
+	// Decapsulate each request chunk
+	for i, _ := range encapsulatedRequestChunks {
+		if i < len(encapsulatedRequestChunks)-1 {
+			gatewayRequestChunks[i], err = gatewayRequestContext.DecapsulateRequestChunk(encapsulatedRequestChunks[i])
+			require.Nil(t, err, "DecapsulateRequestChunk failed")
+		} else {
+			gatewayRequestChunks[i], err = gatewayRequestContext.DecapsulateFinalRequestChunk(encapsulatedRequestChunks[i])
+			require.Nil(t, err, "DecapsulateFinalRequestChunk failed")
+		}
+	}
+
+	// Compare request chunks for equality
+	for i, _ := range rawRequestChunks {
+		require.Equal(t, rawRequestChunks[i], gatewayRequestChunks[i], "Request chunk mismatch")
+	}
+
+	// Encapsulate each response chunk
+	for i, _ := range rawResponseChunks {
+		if i < len(rawResponseChunks)-1 {
+			encapsulatedResponseChunks[i], err = gatewayResponseContext.EncapsulateResponseChunk(rawResponseChunks[i])
+			require.Nil(t, err, "EncapsulateResponseChunk failed")
+		} else {
+			encapsulatedResponseChunks[i], err = gatewayResponseContext.EncapsulateFinalResponseChunk(rawResponseChunks[i])
+			require.Nil(t, err, "EncapsulateFinalResponseChunk failed")
+		}
+	}
+
+	// Prepare the client for response chunk decapsulation
+	clientResponseContext, err := clientRequestContext.Prepare(responseHeader)
+	require.Nil(t, err, "Prepare failed")
+
+	// Decapsulate each response chunk
+	for i, _ := range encapsulatedResponseChunks {
+		if i < len(encapsulatedResponseChunks)-1 {
+			clientResponseChunks[i], err = clientResponseContext.DecapsulateResponseChunk(encapsulatedResponseChunks[i])
+			require.Nil(t, err, "DecapsulateResponseChunk failed")
+		} else {
+			clientResponseChunks[i], err = clientResponseContext.DecapsulateFinalResponseChunk(encapsulatedResponseChunks[i])
+			require.Nil(t, err, "DecapsulateFinalResponseChunk failed")
+		}
+	}
+
+	// Compare response chunks for equality
+	for i, _ := range rawResponseChunks {
+		require.Equal(t, rawResponseChunks[i], clientResponseChunks[i], "Response chunk mismatch")
+	}
 }
 
 func TestCustomRoundTrip(t *testing.T) {
@@ -98,7 +180,8 @@ func TestCustomRoundTrip(t *testing.T) {
 	customRequestLabel := "message/app-specific-type req"
 	customResponseLabel := "message/app-specific-type rep"
 
-	client := NewCustomClient(privateConfig.publicConfig, customRequestLabel, customResponseLabel)
+	client, err := NewCustomClient(privateConfig.publicConfig, customRequestLabel, customResponseLabel)
+	require.Nil(t, err, "NewDefaultClient failed")
 	server := NewCustomGateway([]PrivateConfig{privateConfig}, customRequestLabel, customResponseLabel)
 
 	rawRequest := []byte("why is the sky blue?")
@@ -115,7 +198,7 @@ func TestCustomRoundTrip(t *testing.T) {
 	require.Nil(t, err, "EncapsulateResponse failed")
 
 	receivedResp, err := reqContext.DecapsulateResponse(resp)
-	require.Nil(t, err, "EncapsulateResponse failed")
+	require.Nil(t, err, "DecapsulateResponse failed")
 	require.Equal(t, rawResponse, receivedResp, "Response mismatch")
 }
 
@@ -153,7 +236,8 @@ func TestEncodingMismatchFailure(t *testing.T) {
 	customRequestLabel := "message/dns req"
 	customResponseLabel := "message/dns rep"
 
-	client := NewDefaultClient(privateConfig.publicConfig)
+	client, err := NewDefaultClient(privateConfig.publicConfig)
+	require.Nil(t, err, "NewDefaultClient failed")
 	server := NewCustomGateway([]PrivateConfig{privateConfig}, customRequestLabel, customResponseLabel)
 
 	rawRequest := []byte("why is the sky blue?")
@@ -350,7 +434,8 @@ func generateTestVector(t *testing.T, kemID hpke.KEM, kdfID hpke.KDF, aeadID hpk
 	privateConfig, err := NewConfig(0x00, kemID, kdfID, aeadID)
 	require.Nil(t, err, "NewConfig failed")
 
-	client := NewDefaultClient(privateConfig.publicConfig)
+	client, err := NewDefaultClient(privateConfig.publicConfig)
+	require.Nil(t, err, "NewDefaultClient failed")
 	server := NewDefaultGateway([]PrivateConfig{privateConfig})
 
 	rawRequest := []byte("why is the sky blue?")
@@ -391,7 +476,8 @@ func verifyTestVector(t *testing.T, vector testVector) {
 	privateConfig, err := NewConfigFromSeed(0x00, vector.kemID, vector.kdfID, vector.aeadID, vector.configSeed)
 	require.Nil(t, err, "NewConfigFromSeed failed")
 
-	client := NewDefaultClient(privateConfig.publicConfig)
+	client, err := NewDefaultClient(privateConfig.publicConfig)
+	require.Nil(t, err, "NewDefaultClient failed")
 	server := NewDefaultGateway([]PrivateConfig{privateConfig})
 
 	for _, transaction := range vector.transactions {
@@ -469,86 +555,12 @@ func TestVectorVerify(t *testing.T) {
 	verifyTestVectors(t, encoded)
 }
 
-func disableTestDraftVector(t *testing.T) {
-	skSEnc := mustUnhex(t, "3c168975674b2fa8e465970b79c8dcf09f1c741626480bd4c6162fc5b6a98e1a")
-	skEEnc := mustUnhex(t, "bc51d5e930bda26589890ac7032f70ad12e4ecb37abb1b65b1256c9c48999c73")
-	configEnc := mustUnhex(t, "01002031e1f05a740102115220e9af918f738674aec95f54db6e04eb705aae8e79815500080001000100010003")
-	request := mustUnhex(t, "00034745540568747470730b6578616d706c652e636f6d012f")
-	response := mustUnhex(t, "0140c8")
-	expectedEncapRequest := mustUnhex(t, "010020000100014b28f881333e7c164ffc499ad9796f877f4e1051ee6d31bad19dec96c208b4726374e469135906992e1268c594d2a10c695d858c40a026e7965e7d86b83dd440b2c0185204b4d63525")
-	expectedEncapResponse := mustUnhex(t, "c789e7151fcba46158ca84b04464910d86f9013e404feea014e7be4a441f234f857fbd")
-	responseNonce := mustUnhex(t, "4b28f881333e7c164ffc499ad9796f877f4e1051ee6d31bad19dec96c208b472c789e7151fcba46158ca84b04464910d")[32:]
-
-	KEM := hpke.KEM_X25519_HKDF_SHA256
-
-	skR, err := KEM.Scheme().UnmarshalBinaryPrivateKey(skSEnc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	skE, err := KEM.Scheme().UnmarshalBinaryPrivateKey(skEEnc)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	config, err := UnmarshalPublicConfig(configEnc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	privateConfig := PrivateConfig{
-		seed:         nil,
-		publicConfig: config,
-		sk:           skR,
-		pk:           skR.Public(),
-	}
-
-	client := Client{
-		config: config,
-		skE:    skE,
-	}
-	server := Gateway{
-		keyMap: map[uint8]PrivateConfig{
-			config.ID: privateConfig,
-		},
-	}
-
-	encapsulatedRequest, senderContext, err := client.EncapsulateRequest(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(expectedEncapRequest, encapsulatedRequest.Marshal()) {
-		t.Fatal("Encapsulated request mismatch")
-	}
-
-	decapsulatedRequest, receiverContext, err := server.DecapsulateRequest(encapsulatedRequest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(request, decapsulatedRequest) {
-		t.Fatal("Decapsulated request mismatch")
-	}
-
-	encapsulatedResponse, err := receiverContext.encapsulateResponseWithResponseNonce(response, responseNonce)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(expectedEncapResponse, encapsulatedResponse.Marshal()) {
-		t.Fatal("Encapsulated response mismatch")
-	}
-
-	decapsulatedResponse, err := senderContext.DecapsulateResponse(encapsulatedResponse)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(response, decapsulatedResponse) {
-		t.Fatal("Decapsulated response mismatch")
-	}
-}
-
 func BenchmarkRoundTrip(b *testing.B) {
 	privateConfig, err := NewConfig(0x00, hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM)
 	require.Nil(b, err, "CreatePrivateConfig failed")
 
-	client := NewDefaultClient(privateConfig.publicConfig)
+	client, err := NewDefaultClient(privateConfig.publicConfig)
+	require.Nil(b, err, "NewDefaultClient failed")
 	server := NewDefaultGateway([]PrivateConfig{privateConfig})
 
 	rawRequest := []byte("why is the sky blue?")
@@ -558,7 +570,7 @@ func BenchmarkRoundTrip(b *testing.B) {
 	var req EncapsulatedRequest
 	var reqContext EncapsulatedRequestContext
 	var resp EncapsulatedResponse
-	var respContext DecapsulateRequestContext
+	var respContext *GatewayResponseContext
 	b.Run("Encapsulate request", func(b *testing.B) {
 		req, reqContext, err = client.EncapsulateRequest(rawRequest)
 		require.Nil(b, err, "EncapsulateRequest failed")
