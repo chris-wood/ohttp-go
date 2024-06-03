@@ -101,7 +101,11 @@ func TestChunkedRoundTrip(t *testing.T) {
 
 	rawRequestChunks := [][]byte{[]byte("hello"), []byte("world")}
 	encapsulatedRequestChunks := make([]EncapsulatedRequestChunk, len(rawRequestChunks))
+	var finalRequestChunk EncapsulatedFinalRequestChunk
+
 	gatewayRequestChunks := make([][]byte, len(encapsulatedRequestChunks))
+	var finalGatewayRequestChunk []byte
+
 	rawResponseChunks := [][]byte{[]byte("foo"), []byte("bar")}
 	encapsulatedResponseChunks := make([]EncapsulatedResponseChunk, len(rawResponseChunks))
 	clientResponseChunks := make([][]byte, len(encapsulatedResponseChunks))
@@ -116,7 +120,7 @@ func TestChunkedRoundTrip(t *testing.T) {
 			encapsulatedRequestChunks[i], err = clientRequestContext.EncapsulateRequestChunk(rawRequestChunks[i])
 			require.Nil(t, err, "EncapsulateRequestChunk failed")
 		} else {
-			encapsulatedRequestChunks[i], err = clientRequestContext.EncapsulateFinalRequestChunk(rawRequestChunks[i])
+			finalRequestChunk, err = clientRequestContext.EncapsulateFinalRequestChunk(rawRequestChunks[i])
 			require.Nil(t, err, "EncapsulateFinalRequestChunk failed")
 		}
 	}
@@ -131,15 +135,19 @@ func TestChunkedRoundTrip(t *testing.T) {
 			gatewayRequestChunks[i], err = gatewayRequestContext.DecapsulateRequestChunk(encapsulatedRequestChunks[i])
 			require.Nil(t, err, "DecapsulateRequestChunk failed")
 		} else {
-			gatewayRequestChunks[i], err = gatewayRequestContext.DecapsulateFinalRequestChunk(encapsulatedRequestChunks[i])
+			finalGatewayRequestChunk, err = gatewayRequestContext.DecapsulateFinalRequestChunk(finalRequestChunk)
 			require.Nil(t, err, "DecapsulateFinalRequestChunk failed")
 		}
 	}
 
 	// Compare request chunks for equality
 	for i, _ := range rawRequestChunks {
-		require.Equal(t, rawRequestChunks[i], gatewayRequestChunks[i], "Request chunk mismatch")
+		if i < len(encapsulatedRequestChunks)-1 {
+			require.Equal(t, rawRequestChunks[i], gatewayRequestChunks[i], "Request chunk mismatch")
+		}
 	}
+
+	require.Equal(t, rawRequestChunks[len(rawRequestChunks)-1], finalGatewayRequestChunk)
 
 	// Encapsulate each response chunk
 	for i, _ := range rawResponseChunks {

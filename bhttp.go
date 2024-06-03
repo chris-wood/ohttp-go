@@ -1,6 +1,7 @@
 package ohttp
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -593,4 +594,183 @@ func UnmarshalBinaryResponse(data []byte) (*http.Response, error) {
 
 func CreateBinaryResponse(resp *http.Response) BinaryResponse {
 	return BinaryResponse(*resp)
+}
+
+func ConvertBhttpResponse(resp *http.Response) (*http.Response, error) {
+	body := bufio.NewReader(resp.Body)
+	return ParseBhttpResponse(body)
+}
+
+func ParseBhttpResponse(body *bufio.Reader) (*http.Response, error) {
+	frame, err := Read(body)
+	if err != nil {
+		return nil, fmt.Errorf("unable to read bhttp framing indicator: %s", err)
+	}
+
+	switch frame {
+	case 1:
+		return ParseKnownLengthBhttpResponse(body)
+	case 3:
+		return ParseIndeterminateBhttpResponse(body)
+	default:
+		return nil, fmt.Errorf("bad response framing indicator: %d", frame)
+	}
+}
+
+func ParseKnownLengthBhttpResponse(body *bufio.Reader) (*http.Response, error) {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return nil, fmt.Errorf("unable to read the known-length bhttp data: %s", err)
+	}
+
+	// TODO: clean up switching between indeterminate and known-length parsing
+	return UnmarshalBinaryResponse(append([]byte{0x03}, data...))
+}
+
+func ParseIndeterminateBhttpResponse(body *bufio.Reader) (*http.Response, error) {
+	controlData, err := parseIndeterminateResponseControlData(body)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse response control data: %s", err)
+	}
+
+	headers, err := parseIndeterminateFieldSection(body)
+	if err != nil {
+		return nil, fmt.Errorf("could not parse bhttp field section: %s", err)
+	}
+
+	new_body, err := setupIndeterminateContentBody(body)
+	if err != nil {
+		return nil, fmt.Errorf("unable to construct intdeterminate body parser")
+	}
+
+	return &http.Response{
+		StatusCode: controlData.statusCode,
+		Header:     headers,
+		Body:       new_body,
+	}, nil
+}
+
+func parseIndeterminateResponseControlData(body *bufio.Reader) (responseControlData, error) {
+	statusCode, err := Read(body)
+	if err != nil {
+		return responseControlData{}, fmt.Errorf("unable to read response status code: %s", err)
+	}
+
+	if statusCode <= 199 || statusCode >= 600 {
+		return responseControlData{}, fmt.Errorf("informational responses are unsupported")
+	}
+
+	return responseControlData{
+		statusCode: int(statusCode),
+	}, nil
+}
+
+func parseIndeterminateFieldSection(body *bufio.Reader) (http.Header, error) {
+	headers := make(http.Header)
+
+	for {
+		// Name Length (i) = 1
+		nameLength, err := Read(body)
+
+		// The headers are truncated
+		if err == io.EOF {
+			return headers, nil
+		}
+
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("unable to read response status code: %s", err)
+		}
+
+		// Content Terminator (i) = 0
+		if nameLength == 0 {
+			break
+		}
+
+		name := make([]byte, nameLength)
+		n, err := io.ReadFull(body, name)
+		if n != int(nameLength) || err != nil {
+			return nil, fmt.Errorf("unable to read header name: %s", err)
+		}
+
+		// Value Length (i) = 1
+		valueLength, err := Read(body)
+		if err != nil {
+			return nil, fmt.Errorf("unable to read header value length: %s", err)
+		}
+
+		value := make([]byte, valueLength)
+		n, err = io.ReadFull(body, value)
+		if n != int(valueLength) || err != nil {
+			return nil, fmt.Errorf("unable to read header value: %s", err)
+		}
+
+		headers.Add(string(name), string(value))
+	}
+
+	return headers, nil
+}
+
+func setupIndeterminateContentBody(body *bufio.Reader) (io.ReadCloser, error) {
+	return NewBhttpBody(body)
+}
+
+type BhttpBodyReader struct {
+	inner  *bufio.Reader
+	buffer *bytes.Buffer
+}
+
+var _ io.ReadCloser = (*BhttpBodyReader)(nil)
+
+func NewBhttpBody(inner *bufio.Reader) (BhttpBodyReader, error) {
+	buffer := bytes.NewBuffer([]byte{})
+	return BhttpBodyReader{
+		inner,
+		buffer,
+	}, nil
+}
+
+func (b BhttpBodyReader) Read(buf []byte) (int, error) {
+	// if the buffer has not been fully read, passthrough reads
+	if b.buffer.Len() != 0 {
+		return b.buffer.Read(buf)
+	}
+
+	len, err := b.readNextChunk()
+	if err != nil {
+		return b.buffer.Read(buf)
+	}
+
+	// We are done parsing the body:
+	if len == 0 && err == io.EOF {
+		return 0, io.EOF
+	}
+
+	return 0, err
+}
+
+func (b BhttpBodyReader) readNextChunk() (int, error) {
+	length, err := Read(b.inner)
+
+	if length == 0 {
+		return int(length), io.EOF
+	}
+
+	if err != nil {
+		return int(length), err
+	}
+
+	chunk := make([]byte, length)
+
+	n, err := io.ReadFull(b.inner, chunk)
+	if n != int(length) || err != nil {
+		return int(length), fmt.Errorf("unable to read chunk of length %d: %s", length, err)
+	}
+
+	b.buffer.Write(chunk)
+
+	return int(length), nil
+}
+
+func (b BhttpBodyReader) Close() error {
+	return nil
 }

@@ -271,7 +271,7 @@ func (s *GatewayRequestContext) DecapsulateRequestChunk(requestChunk Encapsulate
 	return s.opener.Open(requestChunk.ct, nil)
 }
 
-func (s *GatewayRequestContext) DecapsulateFinalRequestChunk(requestChunk EncapsulatedRequestChunk) ([]byte, error) {
+func (s *GatewayRequestContext) DecapsulateFinalRequestChunk(requestChunk EncapsulatedFinalRequestChunk) ([]byte, error) {
 	return s.opener.Open(requestChunk.ct, []byte("final"))
 }
 

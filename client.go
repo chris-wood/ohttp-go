@@ -1,9 +1,12 @@
 package ohttp
 
 import (
+	"bufio"
+	"bytes"
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"io"
 
 	"github.com/cloudflare/circl/hpke"
 	"github.com/cloudflare/circl/kem"
@@ -111,6 +114,99 @@ func (c Client) EncapsulateRequest(request []byte) (EncapsulatedRequest, Encapsu
 		}, nil
 }
 
+type ChunkedHpkeReader struct {
+	rc     *EncapsulatedResponseContext
+	inner  *bufio.Reader
+	buffer *bytes.Buffer
+}
+
+func NewChunkedHpkeReader(requestContext EncapsulatedRequestContext, body *bufio.Reader) (*ChunkedHpkeReader, error) {
+	_, _, AEAD := requestContext.suite.Params()
+
+	// Nonce is Nk
+	responseNonceLen := max(int(AEAD.KeySize()), 12)
+	responseNonce := make([]byte, responseNonceLen)
+	n, err := io.ReadFull(body, responseNonce)
+
+	if n != responseNonceLen || err != nil {
+		return nil, fmt.Errorf("unable to read response nonce: %s", err)
+	}
+
+	rc, err := requestContext.Prepare(EncapsulatedResponseHeader{responseNonce: responseNonce})
+	if err != nil {
+		return nil, fmt.Errorf("unable to create response decapsulation context: %s", err)
+	}
+
+	return &ChunkedHpkeReader{
+		rc:     rc,
+		inner:  body,
+		buffer: bytes.NewBuffer([]byte{}),
+	}, nil
+}
+
+func (r ChunkedHpkeReader) Read(buf []byte) (int, error) {
+	// if the buffer has not been fully read, passthrough reads
+	if r.buffer.Len() != 0 {
+		return r.buffer.Read(buf)
+	}
+
+	len, err := r.readNextChunk()
+	if err != nil {
+		return r.buffer.Read(buf)
+	}
+
+	// We are done parsing the body:
+	if len == 0 {
+		return 0, io.EOF
+	}
+
+	return 0, err
+}
+
+func (r ChunkedHpkeReader) readNextChunk() (int, error) {
+	len, err := Read(r.inner)
+	length := int(len)
+
+	if err != nil {
+		return length, nil
+	}
+
+	var chunk []byte
+
+	// read the chunk to the end
+	if length == 0 {
+		finalChunk, err := io.ReadAll(r.inner)
+		if err != nil {
+			return 0, fmt.Errorf("unable to read final chunk: %s", err)
+		}
+
+		chunk, err = r.rc.DecapsulateFinalResponseChunk(EncapsulatedResponseChunk{raw: finalChunk})
+		if err != nil {
+			return 0, fmt.Errorf("unable to decapsulate final chunk: %s", err)
+		}
+	} else {
+		// We have a normal, length-delimited chunk
+		encappedChunk := make([]byte, len)
+		n, err := io.ReadFull(r.inner, encappedChunk)
+		if n != length || err != nil {
+			return 0, fmt.Errorf("unable to read chunk: %s, len=%d", err, n)
+		}
+
+		chunk, err = r.rc.DecapsulateResponseChunk(EncapsulatedResponseChunk{raw: encappedChunk})
+		if err != nil {
+			return 0, fmt.Errorf("unable to read chunk length: %s", err)
+		}
+	}
+
+	r.buffer.Write(chunk)
+
+	return length, nil
+}
+
+func (r ChunkedHpkeReader) Close() error {
+	return nil
+}
+
 func (c *ChunkedClient) Prepare() (EncapsulatedRequestHeader, EncapsulatedRequestContext, error) {
 	return c.header, EncapsulatedRequestContext{
 		responseLabel: []byte(c.responseLabel),
@@ -131,13 +227,13 @@ func (c *EncapsulatedRequestContext) EncapsulateRequestChunk(requestChunk []byte
 	}, nil
 }
 
-func (c *EncapsulatedRequestContext) EncapsulateFinalRequestChunk(requestChunk []byte) (EncapsulatedRequestChunk, error) {
+func (c *EncapsulatedRequestContext) EncapsulateFinalRequestChunk(requestChunk []byte) (EncapsulatedFinalRequestChunk, error) {
 	ct, err := c.context.Seal(requestChunk, []byte("final"))
 	if err != nil {
-		return EncapsulatedRequestChunk{}, err
+		return EncapsulatedFinalRequestChunk{}, err
 	}
 
-	return EncapsulatedRequestChunk{
+	return EncapsulatedFinalRequestChunk{
 		ct: ct,
 	}, nil
 }

@@ -107,6 +107,10 @@ type EncapsulatedRequestChunk struct {
 	ct []byte
 }
 
+type EncapsulatedFinalRequestChunk struct {
+	ct []byte
+}
+
 //	Non-Final Request Chunk {
 //		Length (i) = 1..,
 //		HPKE-Protected Chunk (..),
@@ -117,6 +121,17 @@ func (r EncapsulatedRequestChunk) Marshal() []byte {
 	buffer := bytes.NewBuffer(nil)
 	Write(buffer, uint64(len(r.ct)))
 	b.AddBytes(buffer.Bytes())
+	b.AddBytes(r.ct)
+
+	return b.BytesOrPanic()
+}
+
+// Final Request Chunk Indicator (i) = 0,
+// HPKE-Protected Final Chunk (..),
+func (r EncapsulatedFinalRequestChunk) Marshal() []byte {
+	b := cryptobyte.NewBuilder(nil)
+
+	b.AddBytes([]byte{0})
 	b.AddBytes(r.ct)
 
 	return b.BytesOrPanic()
