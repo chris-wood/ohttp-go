@@ -336,6 +336,325 @@ func TestRequestMarshal(t *testing.T) {
 	}
 }
 
+func TestRequestUnmarshal(t *testing.T) {
+	testHeaderMap := make(map[string]string)
+	testHeaderMap["TestHeader"] = "foo" // len("TestHeader") == 10, len("foo") == 3
+	testTrailerMap := make(map[string]string)
+	testTrailerMap["TestTrailer"] = "bar" // len("TestTrailer") == 11, len("bar") == 3
+
+	tests := []struct {
+		request       *http.Request
+		enc           []byte
+		expectedError error
+	}{
+		{
+			expectedError: errUnexpectedResponseFrame,
+			enc: []byte{
+				// Framing indicator
+				byte(knownLengthResponseFrame),
+				// Request Control Data
+				3, 'G', 'E', 'T',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+				// Known-Length Field Section (Headers)
+				0, // empty list of fields
+				// Known-Length Content
+				4, 'b', 'o', 'd', 'y',
+				// Known-Length Field Section (Trailers)
+				0, // empty list of fields
+				// Padding
+				// empty
+			},
+		},
+		{
+			expectedError: errUnexpectedResponseFrame,
+			enc: []byte{
+				// Framing indicator
+				byte(unknownLengthResponseFrame),
+				// Request Control Data
+				3, 'G', 'E', 'T',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+				// Known-Length Field Section (Headers)
+				0, // empty list of fields
+				// Known-Length Content
+				4, 'b', 'o', 'd', 'y',
+				// Known-Length Field Section (Trailers)
+				0, // empty list of fields
+				// Padding
+				// empty
+			},
+		},
+		{
+			expectedError: errUnsupportedMessageType,
+			enc: []byte{
+				// Framing indicator
+				byte(10),
+				// Request Control Data
+				3, 'G', 'E', 'T',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+				// Known-Length Field Section (Headers)
+				0, // empty list of fields
+				// Known-Length Content
+				4, 'b', 'o', 'd', 'y',
+				// Known-Length Field Section (Trailers)
+				0, // empty list of fields
+				// Padding
+				// empty
+			},
+		},
+		{
+			request: createRequestFromParts(http.MethodGet, "https://example.com/index.html", nil),
+			enc: []byte{
+				// Framing indicator
+				byte(knownLengthRequestFrame),
+				// Request Control Data
+				3, 'G', 'E', 'T',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+				// Known-Length Field Section (Headers)
+				0, // empty list of fields
+				// Known-Length Content
+				0, // empty content
+				// Known-Length Field Section (Trailers)
+				0, // empty list of fields
+				// Padding
+				// empty
+			},
+		},
+		{
+			request: createRequestFromParts(http.MethodGet, "https://example.com/index.html", []byte("body")),
+			enc: []byte{
+				// Framing indicator
+				byte(knownLengthRequestFrame),
+				// Request Control Data
+				3, 'G', 'E', 'T',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+				// Known-Length Field Section (Headers)
+				0, // empty list of fields
+				// Known-Length Content
+				4, 'b', 'o', 'd', 'y',
+				// Known-Length Field Section (Trailers)
+				0, // empty list of fields
+				// Padding
+				// empty
+			},
+		},
+		{
+			request: createFullRequestFromParts(http.MethodGet, "https://example.com/index.html", testHeaderMap, nil, []byte("body")),
+			enc: []byte{
+				// Framing indicator
+				byte(knownLengthRequestFrame),
+				// Request Control Data
+				3, 'G', 'E', 'T',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+				// Known-Length Field Section (Headers)
+				15,
+				10, 't', 'e', 's', 't', 'h', 'e', 'a', 'd', 'e', 'r',
+				3, 'f', 'o', 'o',
+				// Known-Length Content
+				4, 'b', 'o', 'd', 'y',
+				// Known-Length Field Section (Trailers)
+				0, // empty list of fields
+				// Padding
+				// empty
+			},
+		},
+		{
+			request: createFullRequestFromParts(http.MethodGet, "https://example.com/index.html", testHeaderMap, testTrailerMap, []byte("body")),
+			enc: []byte{
+				// Framing indicator
+				byte(knownLengthRequestFrame),
+				// Request Control Data
+				3, 'G', 'E', 'T',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+				// Known-Length Field Section (Headers)
+				15,
+				10, 't', 'e', 's', 't', 'h', 'e', 'a', 'd', 'e', 'r',
+				3, 'f', 'o', 'o',
+				// Known-Length Content
+				4, 'b', 'o', 'd', 'y',
+				// Known-Length Field Section (Trailers)
+				16,
+				11, 't', 'e', 's', 't', 't', 'r', 'a', 'i', 'l', 'e', 'r',
+				3, 'b', 'a', 'r',
+				// Padding
+				// empty
+			},
+		},
+		{
+			request: createRequestFromParts(http.MethodGet, "https://example.com/index.html", nil),
+			enc: []byte{
+				// Framing indicator
+				byte(unknownLengthRequestFrame),
+				// Request Control Data
+				3, 'G', 'E', 'T',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+				// Indeterminate-Length Field Section (Headers)
+				0, // terminator
+				// Indeterminate-Length Content
+				0, // terminator
+				// Indeterminate-Length Field Section (Trailers)
+				0, // terminator
+				// Padding
+				// empty
+			},
+		},
+		{
+			request: createRequestFromParts(http.MethodGet, "https://example.com/index.html", []byte("body")),
+			enc: []byte{
+				// Framing indicator
+				byte(unknownLengthRequestFrame),
+				// Request Control Data
+				3, 'G', 'E', 'T',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+				// Indeterminate-Length Field Section (Headers)
+				0, // terminator
+				// Indeterminate-Length Content
+				4, 'b', 'o', 'd', 'y',
+				0, //terminator
+				// Indeterminate-Length Field Section (Trailers)
+				0, // terminator
+				// Padding
+				// empty
+			},
+		},
+		{
+			request: createFullRequestFromParts(http.MethodGet, "https://example.com/index.html", testHeaderMap, nil, []byte("body")),
+			enc: []byte{
+				// Framing indicator
+				byte(unknownLengthRequestFrame),
+				// Request Control Data
+				3, 'G', 'E', 'T',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+				// Indeterminate-Length Field Section (Headers)
+				10, 't', 'e', 's', 't', 'h', 'e', 'a', 'd', 'e', 'r',
+				3, 'f', 'o', 'o',
+				0, // terminator
+				// Indeterminate-Length Content
+				4, 'b', 'o', 'd', 'y',
+				0, // terminator
+				// Indeterminate-Length Field Section (Trailers)
+				0, // empty list of fields
+				// Padding
+				// empty
+			},
+		},
+		{
+			request: createFullRequestFromParts(http.MethodGet, "https://example.com/index.html", testHeaderMap, testTrailerMap, []byte("body")),
+			enc: []byte{
+				// Framing indicator
+				byte(unknownLengthRequestFrame),
+				// Request Control Data
+				3, 'G', 'E', 'T',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+				// Indeterminate-Length Field Section (Headers)
+				10, 't', 'e', 's', 't', 'h', 'e', 'a', 'd', 'e', 'r',
+				3, 'f', 'o', 'o',
+				0, // terminator
+				// Indeterminate-Length Content
+				4, 'b', 'o', 'd', 'y',
+				0, // terminator
+				// Indeterminate-Length Field Section (Trailers)
+				11, 't', 'e', 's', 't', 't', 'r', 'a', 'i', 'l', 'e', 'r',
+				3, 'b', 'a', 'r',
+				0, // terminator
+				// Padding
+				// empty
+			},
+		},
+		{
+			request: createFullRequestFromParts(http.MethodGet, "https://example.com/index.html", testHeaderMap, testTrailerMap, []byte("bodynotbody")),
+			enc: []byte{
+				// Framing indicator
+				byte(unknownLengthRequestFrame),
+				// Request Control Data
+				3, 'G', 'E', 'T',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+				// Indeterminate-Length Field Section (Headers)
+				10, 't', 'e', 's', 't', 'h', 'e', 'a', 'd', 'e', 'r',
+				3, 'f', 'o', 'o',
+				0, // terminator
+				// Indeterminate-Length Content
+				4, 'b', 'o', 'd', 'y',
+				7, 'n', 'o', 't', 'b', 'o', 'd', 'y',
+				0, // terminator
+				// Indeterminate-Length Field Section (Trailers)
+				11, 't', 'e', 's', 't', 't', 'r', 'a', 'i', 'l', 'e', 'r',
+				3, 'b', 'a', 'r',
+				0, // terminator
+				// Padding
+				// empty
+			},
+		},
+		{
+			request: createFullRequestFromParts(http.MethodGet, "https://example.com/index.html", testHeaderMap, testTrailerMap, []byte("b\x00dyn\x00tb\x00dy")),
+			enc: []byte{
+				// Framing indicator
+				byte(unknownLengthRequestFrame),
+				// Request Control Data
+				3, 'G', 'E', 'T',
+				5, 'h', 't', 't', 'p', 's',
+				11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+				11, '/', 'i', 'n', 'd', 'e', 'x', '.', 'h', 't', 'm', 'l',
+				// Indeterminate-Length Field Section (Headers)
+				10, 't', 'e', 's', 't', 'h', 'e', 'a', 'd', 'e', 'r',
+				3, 'f', 'o', 'o',
+				0, // terminator
+				// Indeterminate-Length Content
+				4, 'b', 0, 'd', 'y',
+				7, 'n', 0, 't', 'b', 0, 'd', 'y',
+				0, // terminator
+				// Indeterminate-Length Field Section (Trailers)
+				11, 't', 'e', 's', 't', 't', 'r', 'a', 'i', 'l', 'e', 'r',
+				3, 'b', 'a', 'r',
+				0, // terminator
+				// Padding
+				// empty
+			},
+		},
+	}
+
+	for _, test := range tests {
+		actualRequest, err := UnmarshalBinaryRequest(test.enc)
+
+		if test.expectedError == nil {
+			expectedBinaryRequest := BinaryRequest(*test.request)
+			expectedBytes, err := expectedBinaryRequest.Marshal()
+			require.Nil(t, err, "Expected request marshalling failed")
+
+			actualBinaryRequest := BinaryRequest(*actualRequest)
+			actualBytes, err := actualBinaryRequest.Marshal()
+			require.Nil(t, err, "Actual request marshalling failed")
+
+			require.Equal(t, expectedBytes, actualBytes, "Encoded request mismatch")
+		} else {
+			require.Equal(t, test.expectedError, err, "Expected error mismatch")
+		}
+	}
+}
+
 func createResponseFromParts(statusCode int, headers map[string]string, trailers map[string]string, content []byte) *http.Response {
 	resp := &http.Response{
 		Body:       ioutil.NopCloser(bytes.NewBuffer(content)),

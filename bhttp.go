@@ -27,6 +27,8 @@ const (
 var (
 	errProhibitedField           = errors.New("Prohibited field detected")
 	errInformationalNotSupported = errors.New("Informational messages not supported")
+	errUnexpectedResponseFrame   = errors.New("Expected binary HTTP request, not binary HTTP response")
+	errUnsupportedMessageType    = errors.New("Unsupported binary HTTP message type")
 )
 
 func isProhibitedField(fieldName string) bool {
@@ -70,6 +72,63 @@ func readVarintSlice(b *bytes.Buffer) ([]byte, error) {
 	}
 
 	return value, nil
+}
+
+func readZeroDelimitedSlice(b *bytes.Buffer) ([]byte, error) {
+	data, err := b.ReadBytes(0)
+	if err != nil {
+		return nil, err
+	}
+
+	return data[:len(data)-1], nil
+}
+
+func readSlice(b *bytes.Buffer, indicator frameIndicator) ([]byte, error) {
+	switch indicator {
+	case knownLengthRequestFrame, knownLengthResponseFrame:
+		return readVarintSlice(b)
+	case unknownLengthRequestFrame, unknownLengthResponseFrame:
+		return readZeroDelimitedSlice(b)
+	default:
+		return nil, errUnsupportedMessageType
+	}
+}
+
+func readContent(b *bytes.Buffer, indicator frameIndicator) ([]byte, error) {
+	switch indicator {
+	case knownLengthRequestFrame, knownLengthResponseFrame:
+		return readVarintSlice(b)
+	case unknownLengthRequestFrame, unknownLengthResponseFrame:
+		return readContentChunks(b)
+	default:
+		return nil, errUnsupportedMessageType
+	}
+}
+
+func readContentChunks(b *bytes.Buffer) ([]byte, error) {
+	out := new(bytes.Buffer)
+
+	for {
+		if b.Len() == 0 {
+			break
+		}
+
+		chunk, err := readVarintSlice(b)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(chunk) == 0 {
+			break
+		}
+
+		_, err = out.Write(chunk)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return out.Bytes(), nil
 }
 
 //	Request with Known-Length {
@@ -123,14 +182,12 @@ func UnmarshalBinaryRequest(data []byte) (*http.Request, error) {
 
 	// Filter based on the type of frame
 	switch indicator {
-	case knownLengthRequestFrame:
+	case knownLengthRequestFrame, unknownLengthRequestFrame:
 		break
-	case knownLengthResponseFrame:
-		return nil, fmt.Errorf("Expected binary HTTP request, not binary HTTP response")
-	case unknownLengthRequestFrame:
-	case unknownLengthResponseFrame:
+	case knownLengthResponseFrame, unknownLengthResponseFrame:
+		return nil, errUnexpectedResponseFrame
 	default:
-		return nil, fmt.Errorf("Unsupported binary HTTP message type")
+		return nil, errUnsupportedMessageType
 	}
 
 	// Control data
@@ -165,7 +222,7 @@ func UnmarshalBinaryRequest(data []byte) (*http.Request, error) {
 
 	// Header fields
 	headerFields := new(fieldList)
-	encodedFieldData, err := readVarintSlice(b)
+	encodedFieldData, err := readSlice(b, indicator)
 	if err != nil {
 		return nil, err
 	}
@@ -196,13 +253,13 @@ func UnmarshalBinaryRequest(data []byte) (*http.Request, error) {
 
 	// Content and trailers
 	trailerFields := new(fieldList)
-	content, err := readVarintSlice(b)
+	content, err := readContent(b, indicator)
 	if err != nil {
 		return nil, err
 	}
 	if len(content) == 0 {
 		// Content was truncated, so the trailers MUST also be truncated
-		trailers, err := readVarintSlice(b)
+		trailers, err := readSlice(b, indicator)
 		if err != nil {
 			return nil, err
 		}
@@ -211,8 +268,8 @@ func UnmarshalBinaryRequest(data []byte) (*http.Request, error) {
 		}
 	} else {
 		// Content field was not truncated, so now check for trailers
-		encodedFieldData, err = readVarintSlice(b)
-		if err != nil {
+		encodedFieldData, err = readSlice(b, indicator)
+		if err != nil && !errors.Is(err, io.EOF) {
 			return nil, err
 		}
 		if len(encodedFieldData) > 0 {
@@ -235,6 +292,9 @@ func UnmarshalBinaryRequest(data []byte) (*http.Request, error) {
 	}
 	for _, field := range headerFields.fields {
 		request.Header.Set(field.name, field.value)
+	}
+	if len(trailerFields.fields) > 0 {
+		request.Trailer = make(http.Header)
 	}
 	for _, field := range trailerFields.fields {
 		request.Trailer.Set(field.name, field.value)
