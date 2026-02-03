@@ -423,6 +423,13 @@ func TestResponseMarshal(t *testing.T) {
 	}
 }
 
+func TestTooLargeVarUint(t *testing.T) {
+	// Test that a varint length exceeding buffer size returns errTruncated
+	// 0x0A = 10, but buffer only has 3 bytes remaining after the length
+	_, err := readVarintSlice(bytes.NewBuffer([]byte{0x0A, 'a', 'b', 'c'}))
+	require.Equal(t, errTruncated, err)
+}
+
 func TestTruncation(t *testing.T) {
 	value, err := readVarintSlice(bytes.NewBuffer([]byte{0x00, 0x00}))
 	require.Nil(t, err)
