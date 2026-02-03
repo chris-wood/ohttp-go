@@ -166,6 +166,23 @@ func TestEncodingMismatchFailure(t *testing.T) {
 	require.Nil(t, receivedReq, "Request not nil")
 }
 
+func TestInvalidCiphersuiteInRequest(t *testing.T) {
+	invalidKEM := []byte{0x00, 0xFF, 0xFF, 0x00, 0x01, 0x00, 0x01}
+	_, err := UnmarshalEncapsulatedRequest(invalidKEM)
+	require.NotNil(t, err, "UnmarshalEncapsulatedRequest should fail for invalid KEM")
+	require.Contains(t, err.Error(), "invalid KEM")
+
+	invalidKDF := []byte{0x00, 0x00, 0x20, 0xFF, 0xFF, 0x00, 0x01}
+	_, err = UnmarshalEncapsulatedRequest(invalidKDF)
+	require.NotNil(t, err, "UnmarshalEncapsulatedRequest should fail for invalid KDF")
+	require.Contains(t, err.Error(), "invalid KDF")
+
+	invalidAEAD := []byte{0x00, 0x00, 0x20, 0x00, 0x01, 0xFF, 0xFF}
+	_, err = UnmarshalEncapsulatedRequest(invalidAEAD)
+	require.NotNil(t, err, "UnmarshalEncapsulatedRequest should fail for invalid AEAD")
+	require.Contains(t, err.Error(), "invalid AEAD")
+}
+
 // /////
 // Infallible Serialize / Deserialize
 func fatalOnError(t *testing.T, err error, msg string) {
