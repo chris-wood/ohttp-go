@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"strings"
 )
@@ -560,7 +561,7 @@ func UnmarshalBinaryResponse(data []byte) (*http.Response, error) {
 	}
 	headerMap := make(map[string][]string)
 	for _, field := range headerFields.fields {
-		headerMap[field.name] = []string{field.value}
+		headerMap[textproto.CanonicalMIMEHeaderKey(field.name)] = []string{field.value}
 	}
 
 	// Content

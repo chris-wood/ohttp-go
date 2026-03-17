@@ -43,11 +43,25 @@ func TestSimpleResponse(t *testing.T) {
 		StatusCode: 200,
 		Body:       ioutil.NopCloser(bytes.NewBufferString("test")),
 	}
+	testResponse.Header = make(http.Header)
+	testResponse.Header.Set("Content-Type", "application/json; charset=UTF-8")
+	testResponse.Header.Set("Host", "example.com")
+	testResponse.Header.Set("Foo", "Bar")
+
 	binaryResponse := CreateBinaryResponse(testResponse)
-	_, err := binaryResponse.Marshal()
+	encodedResponse, err := binaryResponse.Marshal()
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	recoveredResponse, err := UnmarshalBinaryResponse(encodedResponse)
+	require.Nil(t, err, "Unmarshal failed")
+
+	require.Equal(t, binaryResponse.StatusCode, recoveredResponse.StatusCode, "StatusCode mismatch")
+	require.Equal(t, recoveredResponse.Header.Get("Foo"), "Bar", "Foo header mismatch")
+	require.Equal(t, recoveredResponse.Header.Get("Host"), "example.com", "Host header mismatch")
+	require.Equal(t, recoveredResponse.Header.Get("Content-Type"), "application/json; charset=UTF-8", "Content-Type header mismatch")
+
 }
 
 func createFullRequestFromParts(method string, url string, headers map[string]string, trailers map[string]string, body []byte) *http.Request {
