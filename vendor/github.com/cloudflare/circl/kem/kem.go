@@ -63,7 +63,7 @@ type Scheme interface {
 	// Size of packed public keys.
 	PublicKeySize() int
 
-	// DeriveKeyPair deterministicallly derives a pair of keys from a seed.
+	// DeriveKeyPair deterministically derives a pair of keys from a seed.
 	// Panics if the length of seed is not equal to the value returned by
 	// SeedSize.
 	DeriveKeyPair(seed []byte) (PublicKey, PrivateKey)
@@ -112,6 +112,9 @@ var (
 
 	// ErrPubKey is the error used if the provided public key is invalid.
 	ErrPubKey = errors.New("invalid public key")
+
+	// ErrPrivKey is the error used if the provided private key is invalid.
+	ErrPrivKey = errors.New("invalid private key")
 
 	// ErrCipherText is the error used if the provided ciphertext is invalid.
 	ErrCipherText = errors.New("invalid ciphertext")

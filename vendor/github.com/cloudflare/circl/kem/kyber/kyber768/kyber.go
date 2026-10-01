@@ -123,10 +123,10 @@ func (pk *PublicKey) EncapsulateTo(ct, ss []byte, seed []byte) {
 		panic("ss must be of length SharedKeySize")
 	}
 
-	// m = H(seed)
 	var m [32]byte
+	// m = H(seed), the hash of shame
 	h := sha3.New256()
-	h.Write(seed[:])
+	h.Write(seed)
 	h.Read(m[:])
 
 	// (K', r) = G(m ‖ H(pk))
@@ -194,7 +194,7 @@ func (sk *PrivateKey) DecapsulateTo(ss, ct []byte) {
 	// K = KDF(K''/z, H(c))
 	kdf := sha3.NewShake256()
 	kdf.Write(kr2[:])
-	kdf.Read(ss[:SharedKeySize])
+	kdf.Read(ss)
 }
 
 // Packs sk to buf.
@@ -246,6 +246,11 @@ func (pk *PublicKey) Pack(buf []byte) {
 // Unpacks pk from buf.
 //
 // Panics if buf is not of size PublicKeySize.
+//
+// Following the round-3 Kyber reference implementation, non-canonical
+// encodings (coefficients in {q, …, 4095}) are accepted and reduced mod q;
+// H(pk) binds the raw bytes. Note that this is different from final FIPS 203,
+// which checks whether the coefficients are reduced (§7.2).
 func (pk *PublicKey) Unpack(buf []byte) {
 	if len(buf) != PublicKeySize {
 		panic("buf must be of length PublicKeySize")
@@ -258,6 +263,7 @@ func (pk *PublicKey) Unpack(buf []byte) {
 	h := sha3.New256()
 	h.Write(buf)
 	h.Read(pk.hpk[:])
+
 }
 
 // Boilerplate down below for the KEM scheme API.
@@ -386,10 +392,10 @@ func (*scheme) Decapsulate(sk kem.PrivateKey, ct []byte) ([]byte, error) {
 }
 
 func (*scheme) UnmarshalBinaryPublicKey(buf []byte) (kem.PublicKey, error) {
+	var ret PublicKey
 	if len(buf) != PublicKeySize {
 		return nil, kem.ErrPubKeySize
 	}
-	var ret PublicKey
 	ret.Unpack(buf)
 	return &ret, nil
 }
