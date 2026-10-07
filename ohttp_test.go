@@ -189,7 +189,7 @@ func fatalOnError(t *testing.T, err error, msg string) {
 	realMsg := fmt.Sprintf("%s: %v", msg, err)
 	if err != nil {
 		if t != nil {
-			t.Fatalf(realMsg)
+			t.Fatalf("%s", realMsg)
 		} else {
 			panic(realMsg)
 		}

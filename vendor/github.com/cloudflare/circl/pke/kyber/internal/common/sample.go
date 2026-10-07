@@ -100,7 +100,7 @@ func (p *Poly) DeriveNoise2(seed []byte, nonce uint8) {
 // Can only be called when DeriveX4Available is true.
 func PolyDeriveUniformX4(ps [4]*Poly, seed *[32]byte, xs, ys [4]uint8) {
 	var perm keccakf1600.StateX4
-	state := perm.Initialize()
+	state := perm.Initialize(false)
 
 	// Absorb the seed in the four states
 	for i := 0; i < 4; i++ {
@@ -205,8 +205,8 @@ func (p *Poly) DeriveUniform(seed *[32]byte, x, y uint8) {
 		_, _ = h.Read(buf[:])
 
 		for j := 0; j < 168; j += 3 {
-			t1 := (uint16(buf[j]) | (uint16(buf[j+1]) << 8)) & 0xfff
-			t2 := (uint16(buf[j+1]>>4) | (uint16(buf[j+2]) << 4)) & 0xfff
+			t1 := (uint16(buf[j]) | (uint16(buf[j+1]) << 8)) & 0xfff      //#nosec G602 -- buf has fixed length 168
+			t2 := (uint16(buf[j+1]>>4) | (uint16(buf[j+2]) << 4)) & 0xfff //#nosec G602 -- buf has fixed length 168
 
 			if t1 < uint16(Q) {
 				p[i] = int16(t1)

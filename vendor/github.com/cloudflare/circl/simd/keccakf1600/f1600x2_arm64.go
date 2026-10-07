@@ -1,13 +1,13 @@
-//go:build arm64 && go1.16
-// +build arm64,go1.16
+//go:build arm64 && go1.16 && !purego
+// +build arm64,go1.16,!purego
 
 package keccakf1600
 
 import "github.com/cloudflare/circl/internal/sha3"
 
-func permuteSIMDx2(state []uint64) { f1600x2ARM(&state[0], &sha3.RC) }
+func permuteSIMDx2(state []uint64, turbo bool) { f1600x2ARM(&state[0], &sha3.RC, turbo) }
 
-func permuteSIMDx4(state []uint64) { permuteScalarX4(state) }
+func permuteSIMDx4(state []uint64, turbo bool) { permuteScalarX4(state, turbo) }
 
 //go:noescape
-func f1600x2ARM(state *uint64, rc *[24]uint64)
+func f1600x2ARM(state *uint64, rc *[24]uint64, turbo bool)
